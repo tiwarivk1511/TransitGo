@@ -8,8 +8,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../components/common/apple_glass_card.dart';
 import '../../../components/common/error_box.dart';
 import '../../../components/common/loading_indicator.dart';
+import '../../../components/train/TrainNumberAutocomplete.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../../data/sources/railradar_source.dart';
 import '../../train_details/train_details_screen.dart';
@@ -303,35 +305,18 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   }
 
   List<LiveMapTrain> get _filteredTrains {
-    List<LiveMapTrain> categoryFiltered;
-
     switch (_filter) {
       case _MapFilter.onTime:
-        categoryFiltered = _allTrains.where((t) => t.delayMinutes <= 0).toList();
-        break;
+        return _allTrains.where((t) => t.delayMinutes <= 0).toList();
       case _MapFilter.delayed:
-        categoryFiltered = _allTrains.where((t) => t.delayMinutes > 0).toList();
-        break;
+        return _allTrains.where((t) => t.delayMinutes > 0).toList();
       case _MapFilter.majorLate:
-        categoryFiltered = _allTrains.where((t) => t.delayMinutes > 30).toList();
-        break;
+        return _allTrains.where((t) => t.delayMinutes > 30).toList();
       case _MapFilter.halt:
-        categoryFiltered = _allTrains.where((t) => t.isHalt).toList();
-        break;
+        return _allTrains.where((t) => t.isHalt).toList();
       case _MapFilter.all:
-        categoryFiltered = _allTrains;
-        break;
+        return _allTrains;
     }
-
-    if (_searchQuery.trim().isEmpty) return categoryFiltered;
-
-    final q = _searchQuery.trim().toLowerCase();
-    return categoryFiltered.where((t) {
-      return t.number.toLowerCase().contains(q) ||
-          t.prevStation.toLowerCase().contains(q) ||
-          t.nextStation.toLowerCase().contains(q) ||
-          t.typeCategory.toLowerCase().contains(q);
-    }).toList();
   }
 
   /// Tapping a train marker or search item triggers live train details fetch:
@@ -360,11 +345,32 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       if (_selectedTrain?.number == train.number) {
         List<LatLng> polylinePoints = [];
         if (details != null) {
+          String enc = (details['encodedPolyline'] ?? details['polyline'] ?? '').toString().trim();
           final geom = details['geometry'];
-          if (geom is Map) {
-            final enc = geom['encodedPolyline']?.toString() ?? '';
-            if (enc.isNotEmpty) {
-              polylinePoints = _decodePolyline(enc);
+          if (enc.isEmpty && geom is Map) {
+            enc = (geom['encodedPolyline'] ?? geom['polyline'] ?? '').toString().trim();
+          }
+          if (enc.isNotEmpty) {
+            polylinePoints = _decodePolyline(enc);
+          } else {
+            // Build points from route stops if encodedPolyline not in payload
+            final routeStops = details['route'] as List<dynamic>? ?? [];
+            final rawPoints = <LatLng>[];
+            final seen = <String>{};
+            for (final item in routeStops) {
+              if (item is Map) {
+                final lat = double.tryParse((item['lat'] ?? item['latitude'] ?? '').toString());
+                final lng = double.tryParse((item['lng'] ?? item['lon'] ?? item['longitude'] ?? '').toString());
+                if (lat != null && lng != null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                  final key = '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
+                  if (seen.add(key)) {
+                    rawPoints.add(LatLng(lat, lng));
+                  }
+                }
+              }
+            }
+            if (rawPoints.length >= 2) {
+              polylinePoints = _smoothCurvedPolyline(rawPoints, samplesPerSegment: 8);
             }
           }
         }
@@ -380,6 +386,45 @@ class _ScheduleScreenState extends State<ScheduleScreen>
         setState(() => _fetchingDetails = false);
       }
     }
+  }
+
+  List<LatLng> _smoothCurvedPolyline(List<LatLng> points, {int samplesPerSegment = 8}) {
+    if (points.length < 3) return points;
+
+    final smoothed = <LatLng>[];
+    final count = points.length;
+
+    for (var i = 0; i < count - 1; i++) {
+      final p0 = points[i == 0 ? 0 : i - 1];
+      final p1 = points[i];
+      final p2 = points[i + 1];
+      final p3 = points[i + 2 >= count ? count - 1 : i + 2];
+
+      for (var step = 0; step < samplesPerSegment; step++) {
+        final t = step / samplesPerSegment;
+        final t2 = t * t;
+        final t3 = t2 * t;
+
+        final f0 = -0.5 * t3 + t2 - 0.5 * t;
+        final f1 = 1.5 * t3 - 2.5 * t2 + 1.0;
+        final f2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t;
+        final f3 = 0.5 * t3 - 0.5 * t2;
+
+        final lat = p0.latitude * f0 + p1.latitude * f1 + p2.latitude * f2 + p3.latitude * f3;
+        final lng = p0.longitude * f0 + p1.longitude * f1 + p2.longitude * f2 + p3.longitude * f3;
+
+        if (lat.isFinite &&
+            lng.isFinite &&
+            lat >= -90.0 &&
+            lat <= 90.0 &&
+            lng >= -180.0 &&
+            lng <= 180.0) {
+          smoothed.add(LatLng(lat, lng));
+        }
+      }
+    }
+    smoothed.add(points.last);
+    return smoothed;
   }
 
   /// Decodes Google/OSM encodedPolyline string to List of LatLng points
@@ -497,7 +542,12 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                   polylines: [
                     Polyline(
                       points: _selectedPolyline,
-                      strokeWidth: 4.5,
+                      strokeWidth: 8.5,
+                      color: const Color(0xFFFF375F).withValues(alpha: 0.28),
+                    ),
+                    Polyline(
+                      points: _selectedPolyline,
+                      strokeWidth: 4.0,
                       color: const Color(0xFFFF375F),
                     ),
                   ],
@@ -640,16 +690,11 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     final onTimeCount = _allTrains.where((t) => t.delayMinutes <= 0).length;
     final delayedCount = _allTrains.where((t) => t.delayMinutes > 0).length;
 
-    return Container(
+    return AppleGlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: cardBg.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: borderCol),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
-        ],
-      ),
+      borderRadius: BorderRadius.circular(22),
+      blurSigma: 14.0,
+      border: Border.all(color: borderCol),
       child: Column(
         children: [
           Row(
@@ -731,43 +776,37 @@ class _ScheduleScreenState extends State<ScheduleScreen>
             ],
           ),
           const SizedBox(height: 8),
-          // Search Bar
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : const Color(0xFFF2F2F7),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              style: GoogleFonts.inter(color: textPrimary, fontSize: 12.5),
-              onChanged: (val) {
-                setState(() => _searchQuery = val);
-                final match = _allTrains.where((t) => t.number == val.trim()).firstOrNull;
-                if (match != null) {
-                  _onTrainTapped(match);
-                }
-              },
-              decoration: InputDecoration(
-                icon: const Icon(CupertinoIcons.search,
-                    size: 16, color: Color(0xFFFF375F)),
-                hintText: 'Search train number (e.g. 14003) or station code...',
-                hintStyle: GoogleFonts.inter(color: textSecondary, fontSize: 12),
-                border: InputBorder.none,
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(CupertinoIcons.xmark_circle_fill,
-                            size: 16, color: Colors.grey),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-              ),
-            ),
+
+          // Train Number & Station Autocomplete Search Field
+          TrainNumberAutocomplete(
+            controller: _searchCtrl,
+            hint: 'Search train number (e.g. 14003) or station...',
+            icon: CupertinoIcons.search,
+            onTrainSelected: (selectedTrainMap) {
+              final trainNo = selectedTrainMap['number'] ?? '';
+              setState(() => _searchQuery = trainNo);
+              final match = _allTrains.where((t) => t.number == trainNo.trim()).firstOrNull;
+              if (match != null) {
+                _onTrainTapped(match);
+              } else if (trainNo.isNotEmpty) {
+                final dummyTrain = LiveMapTrain(
+                  number: trainNo,
+                  typeCode: 1,
+                  direction: 1,
+                  lat: 28.6139,
+                  lng: 77.2090,
+                  bearing: 0.0,
+                  delayMinutes: 0,
+                  isHalt: false,
+                  prevStation: selectedTrainMap['source'] ?? '',
+                  prevDist: 0.0,
+                  nextStation: selectedTrainMap['destination'] ?? '',
+                  nextDist: 0.0,
+                  speed: 0.0,
+                );
+                _onTrainTapped(dummyTrain);
+              }
+            },
           ),
         ],
       ),
@@ -869,16 +908,11 @@ class _ScheduleScreenState extends State<ScheduleScreen>
 
     final coachPos = trainInfo?['coachPosition']?.toString();
 
-    return Container(
+    return AppleGlassCard(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: borderCol),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 14, offset: Offset(0, 6)),
-        ],
-      ),
+      borderRadius: BorderRadius.circular(22),
+      blurSigma: 14.0,
+      border: Border.all(color: borderCol),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
