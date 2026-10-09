@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "308103221424",
+    "project_id": "transitgo-1b966",
+    "storage_bucket": "transitgo-1b966.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:308103221424:android:12aa5132f6130fc21deb75",
+        "android_client_info": {
+          "package_name": "com.hyperlogics.transit_go"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3s5xUHPmaGrGAVT8Fmy7R89EKhdxTxdo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

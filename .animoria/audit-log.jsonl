@@ -1,0 +1,2 @@
+{"event_id":"audit-1790186702056","timestamp_ms":1790186702056,"kind":"scan-completed","actor":"daemon","details":{"asset_count":47,"health_score":41}}
+{"event_id":"audit-1790347333080","timestamp_ms":1790347333080,"kind":"scan-completed","actor":"daemon","details":{"asset_count":47,"health_score":41}}
