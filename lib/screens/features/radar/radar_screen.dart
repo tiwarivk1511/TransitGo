@@ -13,6 +13,7 @@ import '../../../components/common/error_box.dart';
 import '../../../components/common/loading_indicator.dart';
 import '../../../components/train/TrainNumberAutocomplete.dart';
 import '../../../core/theme/theme_controller.dart';
+import '../../../data/models/train.dart';
 import '../../../data/sources/railradar_source.dart';
 import '../../train_details/train_details_screen.dart';
 
@@ -166,6 +167,8 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   String? _error;
   DateTime? _lastFetch;
   Timer? _autoRefreshTimer;
+
+  TrainTracking? _selectedTrainTracking;
 
   _MapFilter _filter = _MapFilter.all;
 
@@ -326,6 +329,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       _selectedTrain = train;
       _fetchingDetails = true;
       _selectedTrainDetails = null;
+      _selectedTrainTracking = null;
       _selectedPolyline = [];
     });
 
@@ -343,40 +347,17 @@ class _ScheduleScreenState extends State<ScheduleScreen>
 
       if (!mounted) return;
       if (_selectedTrain?.number == train.number) {
+        TrainTracking? tracking;
         List<LatLng> polylinePoints = [];
+
         if (details != null) {
-          String enc = (details['encodedPolyline'] ?? details['polyline'] ?? '').toString().trim();
-          final geom = details['geometry'];
-          if (enc.isEmpty && geom is Map) {
-            enc = (geom['encodedPolyline'] ?? geom['polyline'] ?? '').toString().trim();
-          }
-          if (enc.isNotEmpty) {
-            polylinePoints = _decodePolyline(enc);
-          } else {
-            // Build points from route stops if encodedPolyline not in payload
-            final routeStops = details['route'] as List<dynamic>? ?? [];
-            final rawPoints = <LatLng>[];
-            final seen = <String>{};
-            for (final item in routeStops) {
-              if (item is Map) {
-                final lat = double.tryParse((item['lat'] ?? item['latitude'] ?? '').toString());
-                final lng = double.tryParse((item['lng'] ?? item['lon'] ?? item['longitude'] ?? '').toString());
-                if (lat != null && lng != null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-                  final key = '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
-                  if (seen.add(key)) {
-                    rawPoints.add(LatLng(lat, lng));
-                  }
-                }
-              }
-            }
-            if (rawPoints.length >= 2) {
-              polylinePoints = _smoothCurvedPolyline(rawPoints, samplesPerSegment: 8);
-            }
-          }
+          tracking = TrainTracking.parse(details, train.number);
+          polylinePoints = _getRoutePoints(tracking);
         }
 
         setState(() {
           _selectedTrainDetails = details;
+          _selectedTrainTracking = tracking;
           _selectedPolyline = polylinePoints;
           _fetchingDetails = false;
         });
@@ -386,6 +367,150 @@ class _ScheduleScreenState extends State<ScheduleScreen>
         setState(() => _fetchingDetails = false);
       }
     }
+  }
+
+  LatLng? _positionForStop(TrainTracking data, TrainRouteStop stop) {
+    for (final geoStop in data.geoStops) {
+      if (geoStop.latLng == null) continue;
+      if ((stop.sequence > 0 && geoStop.sequence == stop.sequence) ||
+          (stop.stationCode.isNotEmpty &&
+              geoStop.code.toUpperCase() == stop.stationCode.toUpperCase())) {
+        return geoStop.latLng;
+      }
+    }
+    return null;
+  }
+
+  List<LatLng> _snapStationAnchorsToTrack(List<LatLng> polyline, TrainTracking d) {
+    if (polyline.length < 2) return polyline;
+
+    final snapped = List<LatLng>.from(polyline);
+    const distance = Distance();
+
+    final stationPoints = <LatLng>[];
+    for (final stop in d.route) {
+      final pos = _positionForStop(d, stop);
+      if (pos != null && pos.latitude.isFinite && pos.longitude.isFinite) {
+        stationPoints.add(pos);
+      }
+    }
+
+    for (final stnPos in stationPoints) {
+      double minMeters = double.infinity;
+      int minIndex = 0;
+
+      for (int i = 0; i < snapped.length - 1; i++) {
+        final a = snapped[i];
+        final b = snapped[i + 1];
+        final proj = _projectOnSegment(stnPos, a, b);
+        final distMeters = distance.as(LengthUnit.Meter, stnPos, proj);
+
+        if (distMeters < minMeters) {
+          minMeters = distMeters;
+          minIndex = i;
+        }
+      }
+
+      if (minMeters <= 350.0) {
+        snapped[minIndex] = stnPos;
+      }
+    }
+
+    return snapped;
+  }
+
+  List<LatLng> _getRoutePoints(TrainTracking d) {
+    // 1. High-resolution decoded railway track polyline geometry
+    if (d.routeGeometry.length >= 2) {
+      return _snapStationAnchorsToTrack(d.routeGeometry, d);
+    }
+
+    // 2. Sequential station coordinates connecting official journey stops with smooth Catmull-Rom railway curvature
+    final rawPoints = <LatLng>[];
+    final seenKeys = <String>{};
+
+    for (final stop in d.route) {
+      final pos = _positionForStop(d, stop);
+      if (pos != null &&
+          pos.latitude.isFinite &&
+          pos.longitude.isFinite &&
+          pos.latitude >= -90.0 &&
+          pos.latitude <= 90.0 &&
+          pos.longitude >= -180.0 &&
+          pos.longitude <= 180.0) {
+        final key = '${pos.latitude.toStringAsFixed(4)},${pos.longitude.toStringAsFixed(4)}';
+        if (seenKeys.add(key)) {
+          rawPoints.add(pos);
+        }
+      }
+    }
+
+    if (rawPoints.length < 2 && d.geoStops.isNotEmpty) {
+      for (final stop in d.geoStops) {
+        final pos = stop.latLng;
+        if (pos != null &&
+            pos.latitude.isFinite &&
+            pos.longitude.isFinite &&
+            pos.latitude >= -90.0 &&
+            pos.latitude <= 90.0 &&
+            pos.longitude >= -180.0 &&
+            pos.longitude <= 180.0) {
+          final key = '${pos.latitude.toStringAsFixed(4)},${pos.longitude.toStringAsFixed(4)}';
+          if (seenKeys.add(key)) {
+            rawPoints.add(pos);
+          }
+        }
+      }
+    }
+
+    if (rawPoints.length < 2) return const [];
+
+    return _smoothCurvedPolyline(rawPoints, samplesPerSegment: 8);
+  }
+
+  LatLng _projectOnSegment(LatLng p, LatLng a, LatLng b) {
+    final ax = a.latitude;
+    final ay = a.longitude;
+    final bx = b.latitude;
+    final by = b.longitude;
+    final px = p.latitude;
+    final py = p.longitude;
+
+    final dx = bx - ax;
+    final dy = by - ay;
+
+    if (dx == 0 && dy == 0) return a;
+
+    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    return LatLng(ax + t * dx, ay + t * dy);
+  }
+
+  List<LatLng> _coveredSlice(TrainTracking d, LatLng trainPos, List<LatLng> routePoints) {
+    if (routePoints.length < 2) return const [];
+
+    int bestIndex = 0;
+    LatLng bestProj = routePoints.first;
+    double minSqDist = double.infinity;
+
+    for (int i = 0; i < routePoints.length - 1; i++) {
+      final a = routePoints[i];
+      final b = routePoints[i + 1];
+      final proj = _projectOnSegment(trainPos, a, b);
+
+      final dLat = trainPos.latitude - proj.latitude;
+      final dLng = trainPos.longitude - proj.longitude;
+      final sqDist = dLat * dLat + dLng * dLng;
+
+      if (sqDist < minSqDist) {
+        minSqDist = sqDist;
+        bestIndex = i;
+        bestProj = proj;
+      }
+    }
+
+    final slice = routePoints.sublist(0, bestIndex + 1).toList();
+    slice.add(bestProj);
+    return slice.length >= 2 ? slice : const [];
   }
 
   List<LatLng> _smoothCurvedPolyline(List<LatLng> points, {int samplesPerSegment = 8}) {
@@ -537,7 +662,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                   if (kDebugMode) debugPrint('[ScheduleTileError] Handshake / Network tile error for ${tile.coordinates}: $error');
                 },
               ),
-              if (_selectedPolyline.length >= 2)
+              if (_selectedPolyline.length >= 2) ...[
                 PolylineLayer(
                   polylines: [
                     Polyline(
@@ -552,6 +677,23 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                     ),
                   ],
                 ),
+                if (_selectedTrainTracking != null && _selectedTrain != null) ...[
+                  () {
+                    final trainPos = LatLng(_selectedTrain!.lat, _selectedTrain!.lng);
+                    final covered = _coveredSlice(_selectedTrainTracking!, trainPos, _selectedPolyline);
+                    if (covered.length < 2) return const SizedBox.shrink();
+                    return PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: covered,
+                          color: isDark ? Colors.white.withValues(alpha: 0.7) : const Color(0xFF1C1C1E),
+                          strokeWidth: 3.5,
+                        ),
+                      ],
+                    );
+                  }(),
+                ],
+              ],
               MarkerLayer(
                 markers: _buildMarkers(filtered, isDark),
               ),

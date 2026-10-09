@@ -152,6 +152,33 @@ class RailRadarSource {
     }).toList();
   }
 
+  static Future<dynamic> _getJsonWithCorsFallback(Uri primaryUri, {Duration? timeout}) async {
+    final t = timeout ?? _timeout;
+
+    // 1. Primary Direct GET Request
+    try {
+      final res = await http.get(primaryUri, headers: _openWebHeaders).timeout(t);
+      if (res.statusCode == 200) {
+        return json.decode(res.body);
+      }
+    } catch (e) {
+      _debug('[RailRadarApi] Primary GET failed for $primaryUri: $e');
+    }
+
+    // 2. CORS Proxy Fallback for Web/Browser Client Exception Failures
+    try {
+      final proxyUri = Uri.parse('https://corsproxy.io/?${Uri.encodeComponent(primaryUri.toString())}');
+      final res = await http.get(proxyUri).timeout(t);
+      if (res.statusCode == 200) {
+        return json.decode(res.body);
+      }
+    } catch (e) {
+      _debug('[RailRadarApi] CORS Proxy GET failed: $e');
+    }
+
+    return null;
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // 3. LIVE TRAIN RUNNING STATUS (Open Web - No Key Needed)
   // ═══════════════════════════════════════════════════════════════════
@@ -162,6 +189,7 @@ class RailRadarSource {
     final cleanNo = trainNumber.trim().split(' - ').first;
     if (cleanNo.isEmpty) return null;
 
+    final cacheKey = 'live_$cleanNo';
     final uri = Uri.parse(
       'https://railradar.in/app/v1/trains/$cleanNo/live'
       '?geometry=${includeGeometry ? "true" : "false"}'
@@ -170,19 +198,27 @@ class RailRadarSource {
       '&haltsOnly=false',
     );
 
-    try {
-      final res = await http.get(uri, headers: _openWebHeaders).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) {
-        final body = json.decode(res.body);
-        if (body is Map && body['success'] == true && body['data'] is Map) {
-          final map = Map<String, dynamic>.from(body['data'] as Map);
-          unawaited(OfflineCache.put('live_$cleanNo', map, ttl: const Duration(minutes: 10)));
-          return map;
-        }
+    final body = await _getJsonWithCorsFallback(uri);
+    if (body != null) {
+      Map<String, dynamic>? map;
+      if (body is Map && body['success'] == true && body['data'] is Map) {
+        map = Map<String, dynamic>.from(body['data'] as Map);
+      } else if (body is Map && body['data'] is Map) {
+        map = Map<String, dynamic>.from(body['data'] as Map);
       }
-    } catch (e) {
-      _debug('[RailRadarLive] Open web call failed: $e');
+
+      if (map != null) {
+        unawaited(OfflineCache.put(cacheKey, map, ttl: const Duration(minutes: 10)));
+        return map;
+      }
     }
+
+    // Fallback to SQLite cache on network/CORS failure
+    final cached = await OfflineCache.get(cacheKey);
+    if (cached is Map) {
+      return Map<String, dynamic>.from(cached);
+    }
+
     return null;
   }
 
@@ -203,16 +239,14 @@ class RailRadarSource {
       '${date != null && date.isNotEmpty ? "&date=$date" : ""}',
     );
 
-    try {
-      final res = await http.get(uri, headers: _openWebHeaders).timeout(_timeout);
-      if (res.statusCode == 200) {
-        final body = json.decode(res.body);
-        if (body is Map && body['success'] == true && body['data'] is Map) {
-          return Map<String, dynamic>.from(body['data'] as Map);
-        }
+    final body = await _getJsonWithCorsFallback(uri);
+    if (body != null) {
+      if (body is Map && body['success'] == true && body['data'] is Map) {
+        return Map<String, dynamic>.from(body['data'] as Map);
       }
-    } catch (e) {
-      _debug('[RailRadarBetween] Open web call failed: $e');
+      if (body is Map && body['data'] is Map) {
+        return Map<String, dynamic>.from(body['data'] as Map);
+      }
     }
     return null;
   }
@@ -231,19 +265,14 @@ class RailRadarSource {
       'https://railradar.in/app/v1/stations/$code/live?hours=$hours&includeIntermediate=true',
     );
 
-    try {
-      final res = await http.get(uri, headers: _openWebHeaders).timeout(_timeout);
-      if (res.statusCode == 200) {
-        final body = json.decode(res.body);
-        if (body is Map && body['success'] == true && body['data'] is Map) {
-          return Map<String, dynamic>.from(body['data'] as Map);
-        }
-        if (body is Map && body['data'] is Map) {
-          return Map<String, dynamic>.from(body['data'] as Map);
-        }
+    final body = await _getJsonWithCorsFallback(uri);
+    if (body != null) {
+      if (body is Map && body['success'] == true && body['data'] is Map) {
+        return Map<String, dynamic>.from(body['data'] as Map);
       }
-    } catch (e) {
-      _debug('[RailRadarStationLive] Open web call failed: $e');
+      if (body is Map && body['data'] is Map) {
+        return Map<String, dynamic>.from(body['data'] as Map);
+      }
     }
     return null;
   }
@@ -252,24 +281,32 @@ class RailRadarSource {
   // 6. NATIONAL LIVE MAP RADAR (2,000+ Active Trains - Open Web)
   // ═══════════════════════════════════════════════════════════════════
   static Future<List<dynamic>?> liveMap() async {
+    const cacheKey = 'radar_live_map_cache';
     final uri = Uri.parse('https://railradar.in/app/v1/live-map');
-    try {
-      final res = await http.get(uri, headers: _openWebHeaders).timeout(_timeout);
-      if (res.statusCode == 200) {
-        final body = json.decode(res.body);
-        if (body is Map && body['success'] == true && body['data'] is List) {
-          return body['data'] as List;
-        }
-        if (body is Map && body['data'] is List) {
-          return body['data'] as List;
-        }
-        if (body is List) {
-          return body;
-        }
+
+    final body = await _getJsonWithCorsFallback(uri);
+    if (body != null) {
+      List<dynamic>? list;
+      if (body is Map && body['success'] == true && body['data'] is List) {
+        list = body['data'] as List;
+      } else if (body is Map && body['data'] is List) {
+        list = body['data'] as List;
+      } else if (body is List) {
+        list = body;
       }
-    } catch (e) {
-      _debug('[RailRadarLiveMap] Open web live-map call failed: $e');
+
+      if (list != null && list.isNotEmpty) {
+        unawaited(OfflineCache.put(cacheKey, list, ttl: const Duration(minutes: 15)));
+        return list;
+      }
     }
+
+    // Fallback to SQLite cache on network/CORS failure
+    final cached = await OfflineCache.get(cacheKey);
+    if (cached is List && cached.isNotEmpty) {
+      return cached;
+    }
+
     return null;
   }
 

@@ -732,13 +732,17 @@ class _TrainMapScreenState extends State<TrainMapScreen>
                   : [
                       Polyline(
                         points: routePoints,
-                        color: const Color(0xFF0A84FF).withValues(alpha: 0.25),
-                        strokeWidth: 9,
+                        color: isDark
+                            ? Colors.black.withValues(alpha: 0.5)
+                            : const Color(0xFF0A84FF).withValues(alpha: 0.25),
+                        strokeWidth: 8.0,
                       ),
                       Polyline(
                         points: routePoints,
-                        color: const Color(0xFF0A84FF),
-                        strokeWidth: 3.5,
+                        color: isDark
+                            ? const Color(0xFF0A84FF)
+                            : const Color(0xFF1C1C1E),
+                        strokeWidth: 4.5,
                       ),
                     ],
             ),
@@ -750,8 +754,10 @@ class _TrainMapScreenState extends State<TrainMapScreen>
                   polylines: [
                     Polyline(
                       points: covered,
-                      color: isDark ? Colors.white.withValues(alpha: 0.7) : const Color(0xFF1C1C1E),
-                      strokeWidth: 3.5,
+                      color: isDark
+                          ? const Color(0xFF30D158)
+                          : const Color(0xFF0A84FF),
+                      strokeWidth: 4.5,
                     ),
                   ],
                 );
@@ -854,26 +860,48 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     );
   }
 
+  LatLng _projectOnSegment(LatLng p, LatLng a, LatLng b) {
+    final ax = a.latitude;
+    final ay = a.longitude;
+    final bx = b.latitude;
+    final by = b.longitude;
+    final px = p.latitude;
+    final py = p.longitude;
+
+    final dx = bx - ax;
+    final dy = by - ay;
+
+    if (dx == 0 && dy == 0) return a;
+
+    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    return LatLng(ax + t * dx, ay + t * dy);
+  }
+
   List<LatLng> _coveredSlice(TrainTracking d, LatLng trainPos, List<LatLng> routePoints) {
     if (routePoints.length < 2) return const [];
 
-    int nearest = 0;
-    double best = double.infinity;
-    for (var i = 0; i < routePoints.length; i++) {
-      final p = routePoints[i];
-      final dLat = p.latitude - trainPos.latitude;
-      final dLng = p.longitude - trainPos.longitude;
-      final dd = dLat * dLat + dLng * dLng;
-      if (dd < best) {
-        best = dd;
-        nearest = i;
+    int bestIndex = 0;
+    LatLng bestProj = routePoints.first;
+    double minSqDist = double.infinity;
+
+    for (int i = 0; i < routePoints.length - 1; i++) {
+      final a = routePoints[i];
+      final b = routePoints[i + 1];
+      final proj = _projectOnSegment(trainPos, a, b);
+
+      final dLat = trainPos.latitude - proj.latitude;
+      final dLng = trainPos.longitude - proj.longitude;
+      final sqDist = dLat * dLat + dLng * dLng;
+
+      if (sqDist < minSqDist) {
+        minSqDist = sqDist;
+        bestIndex = i;
+        bestProj = proj;
       }
     }
 
-    final slice = routePoints.sublist(0, nearest + 1).toList();
-    if (slice.isEmpty || (slice.last.latitude != trainPos.latitude || slice.last.longitude != trainPos.longitude)) {
-      slice.add(trainPos);
-    }
+    final slice = routePoints.sublist(0, bestIndex + 1).toList();
+    slice.add(bestProj);
     return slice.length >= 2 ? slice : const [];
   }
 
@@ -916,10 +944,48 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     return smoothed;
   }
 
+  List<LatLng> _snapStationAnchorsToTrack(List<LatLng> polyline, TrainTracking d) {
+    if (polyline.length < 2) return polyline;
+
+    final snapped = List<LatLng>.from(polyline);
+    const distance = Distance();
+
+    final stationPoints = <LatLng>[];
+    for (final stop in d.route) {
+      final pos = _positionForStop(d, stop);
+      if (pos != null && pos.latitude.isFinite && pos.longitude.isFinite) {
+        stationPoints.add(pos);
+      }
+    }
+
+    for (final stnPos in stationPoints) {
+      double minMeters = double.infinity;
+      int minIndex = 0;
+
+      for (int i = 0; i < snapped.length - 1; i++) {
+        final a = snapped[i];
+        final b = snapped[i + 1];
+        final proj = _projectOnSegment(stnPos, a, b);
+        final distMeters = distance.as(LengthUnit.Meter, stnPos, proj);
+
+        if (distMeters < minMeters) {
+          minMeters = distMeters;
+          minIndex = i;
+        }
+      }
+
+      if (minMeters <= 350.0) {
+        snapped[minIndex] = stnPos;
+      }
+    }
+
+    return snapped;
+  }
+
   List<LatLng> _getRoutePoints(TrainTracking d) {
-    // 1. High-resolution decoded railway track polyline geometry
+    // 1. High-resolution decoded railway track polyline geometry anchored to station stops
     if (d.routeGeometry.length >= 2) {
-      return d.routeGeometry;
+      return _snapStationAnchorsToTrack(d.routeGeometry, d);
     }
 
     // 2. Sequential station coordinates connecting official journey stops with smooth Catmull-Rom railway curvature
