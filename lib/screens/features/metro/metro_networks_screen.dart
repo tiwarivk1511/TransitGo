@@ -464,7 +464,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
           icon: Icon(CupertinoIcons.chevron_back, color: textPrimary),
@@ -474,7 +474,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Indian Metro Transit',
+              'Indian Metro Networks',
               style: GoogleFonts.inter(
                 color: textPrimary,
                 fontWeight: FontWeight.w800,

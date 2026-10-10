@@ -493,9 +493,16 @@ class TrainTracking {
     return DateTime.tryParse(v.toString());
   }
 
+  static final Map<String, List<LatLng>> _polylineMemoryCache = {};
+
   static List<LatLng> _decodePolyline(String encoded) {
+    if (encoded.isEmpty) return const [];
+
+    if (_polylineMemoryCache.containsKey(encoded)) {
+      return _polylineMemoryCache[encoded]!;
+    }
+
     final poly = <LatLng>[];
-    if (encoded.isEmpty) return poly;
     int index = 0;
     final len = encoded.length;
     int lat = 0;
@@ -528,14 +535,22 @@ class TrainTracking {
         final pLng = lng / 1E5;
         if (pLat.isFinite &&
             pLng.isFinite &&
-            pLat >= -90 &&
-            pLat <= 90 &&
-            pLng >= -180 &&
-            pLng <= 180) {
+            pLat >= -90.0 &&
+            pLat <= 90.0 &&
+            pLng >= -180.0 &&
+            pLng <= 180.0) {
           poly.add(LatLng(pLat, pLng));
         }
       }
     } catch (_) {}
+
+    if (poly.isNotEmpty) {
+      if (_polylineMemoryCache.length > 50) {
+        _polylineMemoryCache.clear();
+      }
+      _polylineMemoryCache[encoded] = poly;
+    }
+
     return poly;
   }
 

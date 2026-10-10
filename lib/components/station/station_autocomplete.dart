@@ -75,12 +75,27 @@ class _StationAutocompleteState extends State<StationAutocomplete> {
     _debounce = Timer(const Duration(milliseconds: 220), () => _search(q));
   }
 
+  static final Map<String, List<Station>> _stationMemoryCache = {};
+
   Future<void> _search(String q) async {
     final seq = ++_reqSeq;
+
+    final cacheKey = q.toLowerCase();
+    if (_stationMemoryCache.containsKey(cacheKey)) {
+      if (mounted) {
+        setState(() {
+          _suggestions = _stationMemoryCache[cacheKey]!;
+          _remoteLoading = false;
+        });
+      }
+      return;
+    }
 
     final local = await StationService.search(q);
     if (!mounted || seq != _reqSeq) return;
     if (local.isNotEmpty && local.every(_hasAreaMetadata)) {
+      if (_stationMemoryCache.length > 100) _stationMemoryCache.clear();
+      _stationMemoryCache[cacheKey] = local;
       setState(() {
         _suggestions = local;
         _remoteLoading = false;
@@ -97,8 +112,8 @@ class _StationAutocompleteState extends State<StationAutocomplete> {
       setState(() => _remoteLoading = true);
     }
 
-    final cacheKey = 'station_search_${q.toLowerCase()}';
-    final cached = await OfflineCache.get(cacheKey);
+    final offlineCacheKey = 'station_search_${q.toLowerCase()}';
+    final cached = await OfflineCache.get(offlineCacheKey);
     final remote = cached is List
         ? cached
               .whereType<Map>()
@@ -113,7 +128,7 @@ class _StationAutocompleteState extends State<StationAutocomplete> {
         .toList();
     if (cached == null && remoteStations.isNotEmpty) {
       await OfflineCache.put(
-        cacheKey,
+        offlineCacheKey,
         remoteStations.map((station) => station.toJson()).toList(),
         ttl: const Duration(days: 30),
       );
@@ -130,8 +145,13 @@ class _StationAutocompleteState extends State<StationAutocomplete> {
     ];
 
     if (!mounted || seq != _reqSeq) return;
+    final finalResult = merged.take(8).toList();
+    if (finalResult.isNotEmpty) {
+      if (_stationMemoryCache.length > 100) _stationMemoryCache.clear();
+      _stationMemoryCache[cacheKey] = finalResult;
+    }
     setState(() {
-      _suggestions = merged.take(8).toList();
+      _suggestions = finalResult;
       _remoteLoading = false;
     });
   }

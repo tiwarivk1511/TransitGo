@@ -138,14 +138,17 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
     if (_data == null || !_detailScrollController.hasClients) return;
     final curIdx = _data!.currentIndex;
     if (curIdx < 0) return;
-    final offset = (curIdx * 75.0).clamp(
+
+    // Timeline station item height is ~110px. Scroll so current live station appears centered
+    final offset = (curIdx * 110.0 - 100.0).clamp(
       0.0,
       _detailScrollController.position.maxScrollExtent,
     );
+
     _detailScrollController.animateTo(
       offset,
-      duration: const Duration(milliseconds: 700),
-      curve: Curves.easeInOut,
+      duration: const Duration(milliseconds: 750),
+      curve: Curves.fastOutSlowIn,
     );
   }
 
@@ -178,9 +181,9 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
             });
             if (!_hasScrolledToCurrent) {
               _hasScrolledToCurrent = true;
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => _scrollToCurrentStation(),
-              );
+              Future.delayed(const Duration(milliseconds: 400), () {
+                if (mounted) _scrollToCurrentStation();
+              });
             }
           },
           onError: (e) {
@@ -279,9 +282,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
         final d = _data;
         final trainType = d?.trainType ?? widget.journeyInfo?.trainType ?? '';
         final isDark = ThemeController.instance.isDarkMode;
-        final bgColor = isDark
-            ? const Color(0xFF09090C)
-            : const Color(0xFFF2F2F7);
         final cardBg = isDark
             ? const Color(0xFF16161C)
             : const Color(0xFFFFFFFF);
@@ -558,7 +558,11 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
       child: GestureDetector(
         onTap: () {
           setState(() => _detailTab = index);
-          if (index == 1 && _crossings.isEmpty && !_loadingCrossings) {
+          if (index == 0) {
+            Future.delayed(const Duration(milliseconds: 200), () {
+              if (mounted) _scrollToCurrentStation();
+            });
+          } else if (index == 1 && _crossings.isEmpty && !_loadingCrossings) {
             _fetchCrossings();
           }
         },
@@ -1227,7 +1231,26 @@ class _RouteTimeline extends StatelessWidget {
                 TrainRouteStop.formatHm(stop.scheduledArrival) ?? '--';
             final schDepStr =
                 TrainRouteStop.formatHm(stop.scheduledDeparture) ?? '--';
-            final delayMins = stop.delayMinutes ?? 0;
+
+            final liveTrainDelay = data.delayMinutes;
+            final stopDelay = stop.delayMinutes ?? (isPassed ? 0 : liveTrainDelay);
+
+            String passTimeDisplay = arrStr;
+            if (!isHalt && !isFirst && !isLast) {
+              if (stop.effectiveArrival != null) {
+                passTimeDisplay = TrainRouteStop.formatHm(stop.effectiveArrival) ?? '--';
+              } else if (stop.scheduledArrival != null && stopDelay > 0) {
+                final estDt = stop.scheduledArrival!.add(Duration(minutes: stopDelay));
+                passTimeDisplay = DateFormat('h:mm a').format(estDt);
+              } else if (stop.scheduledDeparture != null && stopDelay > 0) {
+                final estDt = stop.scheduledDeparture!.add(Duration(minutes: stopDelay));
+                passTimeDisplay = DateFormat('h:mm a').format(estDt);
+              } else if (schArrStr != '--') {
+                passTimeDisplay = schArrStr;
+              } else if (schDepStr != '--') {
+                passTimeDisplay = schDepStr;
+              }
+            }
 
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
@@ -1389,13 +1412,15 @@ class _RouteTimeline extends StatelessWidget {
                                 fontSize: 12,
                               ),
                             )
-                          else if (!isHalt && arrStr == depStr)
+                          else if (!isHalt)
                             Text(
-                              'Pass: $arrStr',
+                              'Pass: $passTimeDisplay',
                               style: GoogleFonts.inter(
-                                color: textSecondary,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 11,
+                                color: isCurrent
+                                    ? const Color(0xFF30D158)
+                                    : textPrimary,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 11.5,
                               ),
                             )
                           else
@@ -1434,18 +1459,20 @@ class _RouteTimeline extends StatelessWidget {
                               ],
                             ),
                           const SizedBox(height: 2),
-                          if (delayMins > 0)
+                          if (stopDelay > 0)
                             Text(
-                              '+${delayMins}m late',
+                              '+${stopDelay}m late',
                               style: GoogleFonts.inter(
-                                color: const Color(0xFFFF9F0A),
+                                color: isPassed
+                                    ? const Color(0xFFFF9F0A).withValues(alpha: 0.7)
+                                    : const Color(0xFFFF9F0A),
                                 fontSize: 9,
                                 fontWeight: FontWeight.w800,
                               ),
                             )
                           else if (isPassed || isCurrent)
                             Text(
-                              'On Time',
+                              'On Time 🟢',
                               style: GoogleFonts.inter(
                                 color: const Color(0xFF30D158),
                                 fontSize: 9,

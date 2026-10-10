@@ -60,6 +60,8 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
     return '';
   }
 
+  static final Map<String, List<Map<String, dynamic>>> _searchMemoryCache = {};
+
   Future<void> _search() async {
     final q = widget.controller.text.trim();
     final seq = ++_reqSeq;
@@ -78,6 +80,17 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
       if (mounted) {
         setState(() {
           _items = [];
+          _loading = false;
+        });
+      }
+      return;
+    }
+
+    final cacheKey = q.toLowerCase();
+    if (_searchMemoryCache.containsKey(cacheKey)) {
+      if (mounted) {
+        setState(() {
+          _items = _searchMemoryCache[cacheKey]!;
           _loading = false;
         });
       }
@@ -165,6 +178,10 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
     }
 
     if (!mounted || seq != _reqSeq) return;
+    if (merged.isNotEmpty) {
+      if (_searchMemoryCache.length > 100) _searchMemoryCache.clear();
+      _searchMemoryCache[cacheKey] = merged;
+    }
     setState(() {
       _items = merged;
       _loading = false;
