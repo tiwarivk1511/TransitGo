@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../components/common/feature_intro.dart';
 import '../../../components/common/modern_background.dart';
 import '../../../components/station/station_autocomplete.dart';
+import '../../../components/train/TrainNumberAutocomplete.dart';
 import '../../../core/cache/offline_cache.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../../data/models/station.dart';
@@ -20,11 +21,19 @@ import '../../train_details/train_details_screen.dart';
 class StationInfoScreen extends StatefulWidget {
   final String? initialStationCode;
   final String? initialStationName;
+  final String? initialTrainNumber;
+  final String? initialTrainName;
+  final String? routeFromCode;
+  final String? routeToCode;
 
   const StationInfoScreen({
     super.key,
     this.initialStationCode,
     this.initialStationName,
+    this.initialTrainNumber,
+    this.initialTrainName,
+    this.routeFromCode,
+    this.routeToCode,
   });
 
   @override
@@ -34,6 +43,7 @@ class StationInfoScreen extends StatefulWidget {
 class _StationInfoScreenState extends State<StationInfoScreen>
     with SingleTickerProviderStateMixin {
   final _ctrl = TextEditingController();
+  final _routeTrainCtrl = TextEditingController();
   Station? _selected;
   late TabController _tabController;
   bool _loadingTraffic = false;
@@ -45,7 +55,10 @@ class _StationInfoScreenState extends State<StationInfoScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
+    if (widget.initialTrainNumber != null && widget.initialTrainNumber!.isNotEmpty) {
+      _routeTrainCtrl.text = widget.initialTrainNumber!;
+    }
     final code = widget.initialStationCode?.trim();
     if (code != null && code.isNotEmpty) {
       final normalizedCode = code.toUpperCase();
@@ -82,6 +95,7 @@ class _StationInfoScreenState extends State<StationInfoScreen>
   @override
   void dispose() {
     _ctrl.dispose();
+    _routeTrainCtrl.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -228,6 +242,7 @@ class _StationInfoScreenState extends State<StationInfoScreen>
                   ),
                   tabs: const [
                     Tab(text: 'Overview'),
+                    Tab(text: 'Route & Schedule'),
                     Tab(text: 'Facilities'),
                     Tab(text: 'Helplines'),
                     Tab(text: 'Map & Nearby'),
@@ -242,6 +257,7 @@ class _StationInfoScreenState extends State<StationInfoScreen>
                   controller: _tabController,
                   children: [
                     _infoCard(s, cardBg, textPrimary, textSecondary, borderCol),
+                    _routeScheduleTab(s, cardBg, textPrimary, textSecondary, borderCol),
                     _facilitiesTab(s, cardBg, textPrimary, textSecondary, borderCol),
                     _helplinesTab(s, cardBg, textPrimary, textSecondary, borderCol),
                     _mapTab(s, cardBg, textPrimary, textSecondary, borderCol, inputBg),
@@ -443,6 +459,34 @@ class _StationInfoScreenState extends State<StationInfoScreen>
         if (s.elevation != null) _row('Elevation', '${s.elevation} meters', textPrimary, textSecondary),
         if (s.hasCoordinates) _row('GPS Coordinates', '${s.latitude!.toStringAsFixed(5)}, ${s.longitude!.toStringAsFixed(5)}', textPrimary, textSecondary),
 
+        if (widget.initialTrainNumber != null && widget.initialTrainNumber!.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A84FF).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF0A84FF).withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(CupertinoIcons.tram_fill, color: Color(0xFF0A84FF), size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Route Train ${widget.initialTrainNumber}${widget.initialTrainName != null ? " (${widget.initialTrainName})" : ""} stops at ${s.code}',
+                    style: GoogleFonts.inter(
+                      color: const Color(0xFF0A84FF),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+
         if (_loadingExplorer)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
@@ -477,6 +521,274 @@ class _StationInfoScreenState extends State<StationInfoScreen>
       ],
     ),
   );
+
+  Widget _routeScheduleTab(
+    Station s,
+    Color cardBg,
+    Color textPrimary,
+    Color textSecondary,
+    Color borderCol,
+  ) {
+    final activeTrainInput = _routeTrainCtrl.text.trim();
+    final activeTrain = activeTrainInput.isNotEmpty
+        ? activeTrainInput
+        : (widget.initialTrainNumber ?? '');
+    final initialName = widget.initialTrainName ?? '';
+    final fromSt = widget.routeFromCode;
+    final toSt = widget.routeToCode;
+
+    final isDark = ThemeController.instance.isDarkMode;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: borderCol),
+      ),
+      child: ListView(
+        physics: const BouncingScrollPhysics(),
+        children: [
+          // Filter / Search Particular Train Route Box
+          Container(
+            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF181B28) : const Color(0xFFF7F8FC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderCol),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'PARTICULAR ROUTE DETAILS FOR STATION ${s.code}',
+                  style: GoogleFonts.inter(
+                    color: const Color(0xFF0A84FF),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TrainNumberAutocomplete(
+                  controller: _routeTrainCtrl,
+                  hint: 'Enter Train number or name (e.g. 12417, Prayagraj)',
+                  icon: CupertinoIcons.tram_fill,
+                ),
+              ],
+            ),
+          ),
+
+          if (activeTrain.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A84FF).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF0A84FF).withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(CupertinoIcons.checkmark_seal_fill, color: Color(0xFF0A84FF), size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'ACTIVE ROUTE PASS-THROUGH',
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF0A84FF),
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$activeTrain ${initialName.isNotEmpty ? "• $initialName" : ""}',
+                    style: GoogleFonts.inter(
+                      color: textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (fromSt != null && toSt != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Route Section: $fromSt ➔ ${s.code} ➔ $toSt',
+                      style: GoogleFonts.inter(
+                        color: textSecondary,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 36,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        final cleanNo = activeTrain.split(' - ').first.replaceAll(RegExp(r'\D'), '');
+                        if (cleanNo.isNotEmpty) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TrainDetailsScreen(
+                                trainNumber: cleanNo,
+                                trainName: initialName,
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(CupertinoIcons.map_fill, size: 14),
+                      label: Text(
+                        'View Full Route & Live Status',
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w800, fontSize: 11),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0A84FF),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          Text(
+            'RAILWAY MAIN LINE CORRIDOR & ROUTE DETAILS',
+            style: GoogleFonts.inter(
+              color: textSecondary,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          _row('Primary Route Line', '${s.name} Corridor Line', textPrimary, textSecondary),
+          _row('Operating Division', '${_formatZone(s.zone)} / ${s.division ?? "Central"}', textPrimary, textSecondary),
+          _row('Line Gauge & Track', 'Broad Gauge (1676 mm) • Double Electrified Line', textPrimary, textSecondary),
+          _row('Platform Lines', 'Platforms • Up & Down Fast Corridors', textPrimary, textSecondary),
+          _row('Reversal Junction Status', 'Major Halt & Reversal Junction', textPrimary, textSecondary),
+
+          const SizedBox(height: 16),
+          Divider(color: borderCol, height: 1),
+          const SizedBox(height: 16),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'MAJOR PASSING TRAINS ON THIS ROUTE',
+                style: GoogleFonts.inter(
+                  color: textSecondary,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(CupertinoIcons.refresh_bold, color: Color(0xFF0A84FF), size: 16),
+                onPressed: () => _fetchTraffic(s.code),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          if (_loadingTraffic)
+            const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Color(0xFF0A84FF))))
+          else if (_trafficData?.movements == null || _trafficData!.movements.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                'Route trains schedule currently updating for station ${s.code}.',
+                style: GoogleFonts.inter(color: textSecondary, fontSize: 11.5),
+              ),
+            )
+          else
+            ..._trafficData!.movements.take(15).map((t) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: textPrimary.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: borderCol),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${t.trainNumber} • ${t.trainName}',
+                            style: GoogleFonts.inter(
+                              color: textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'PF ${t.platform ?? "--"} • Time: ${t.arrival ?? t.departure ?? "--"}'
+                            '${t.destination.isNotEmpty ? " • Towards ${t.destination}" : ""}',
+                            style: GoogleFonts.inter(
+                              color: textSecondary,
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TrainDetailsScreen(
+                              trainNumber: t.trainNumber,
+                              trainName: t.trainName,
+                            ),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0A84FF).withValues(alpha: 0.15),
+                        foregroundColor: const Color(0xFF0A84FF),
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        'View Route',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
 
   Widget _facilitiesTab(Station s, Color cardBg, Color textPrimary, Color textSecondary, Color borderCol) => Container(
     padding: const EdgeInsets.all(18),
@@ -738,9 +1050,24 @@ class _StationInfoScreenState extends State<StationInfoScreen>
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: GoogleFonts.inter(color: textSecondary, fontSize: 11.5, fontWeight: FontWeight.w600)),
-          Text(value, style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 12)),
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: GoogleFonts.inter(color: textSecondary, fontSize: 11.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ),
         ],
       ),
     );

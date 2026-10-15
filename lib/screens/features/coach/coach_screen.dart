@@ -113,7 +113,8 @@ class _CoachScreenState extends State<CoachScreen> {
   List<CoachInfo> _getActiveCoaches(TrainFormation f) {
     if (_selectedStationCode != null &&
         f.stationVariations.containsKey(_selectedStationCode)) {
-      return f.stationVariations[_selectedStationCode]!;
+      final list = f.stationVariations[_selectedStationCode];
+      if (list != null && list.isNotEmpty) return list;
     }
     return f.coaches;
   }
@@ -176,11 +177,95 @@ class _CoachScreenState extends State<CoachScreen> {
   }
 
   void _onSearchSeat() {
-    final text = _seatCtrl.text.trim();
-    if (text.isNotEmpty) {
+    final rawText = _seatCtrl.text.trim();
+    if (rawText.isEmpty) {
+      setState(() => _searchedSeat = null);
+      return;
+    }
+
+    if (_data != null) {
+      final activeCoaches = _getActiveCoaches(_data!);
+      final upperText = rawText.toUpperCase();
+      CoachInfo? targetCoach;
+
+      // 1. Check if user typed coach code (e.g. S1, B2, A1, M3, 3A, 2A, etc.)
+      for (final coach in activeCoaches) {
+        final cCode = coach.code.toUpperCase();
+        if (cCode.isNotEmpty) {
+          if (upperText.startsWith('$cCode ') ||
+              upperText.startsWith('$cCode-') ||
+              upperText.startsWith('${cCode}_') ||
+              upperText == cCode ||
+              upperText.contains(' $cCode') ||
+              upperText.contains('-$cCode')) {
+            targetCoach = coach;
+            break;
+          }
+        }
+      }
+
+      // If no exact match, test loose code match
+      if (targetCoach == null) {
+        for (final coach in activeCoaches) {
+          final cCode = coach.code.toUpperCase();
+          if (cCode.isNotEmpty && upperText.contains(cCode)) {
+            targetCoach = coach;
+            break;
+          }
+        }
+      }
+
+      // 2. If no coach code in search, auto-switch away from non-passenger coach (ENG/LOCO/EOG)
+      if (targetCoach == null) {
+        final currentCat = (_selectedCoach?.category ?? '').toUpperCase();
+        final currentCode = (_selectedCoach?.code ?? '').toUpperCase();
+        final isNonPassenger = _selectedCoach == null ||
+            currentCat == 'LOCO' ||
+            currentCat == 'ENG' ||
+            currentCat == 'EOG' ||
+            currentCat == 'PC' ||
+            currentCat == 'PANTRY' ||
+            currentCode.contains('ENG') ||
+            currentCode == 'LOCO';
+
+        if (isNonPassenger) {
+          for (final coach in activeCoaches) {
+            final cat = coach.category.toUpperCase();
+            final code = coach.code.toUpperCase();
+            final isPass = cat != 'LOCO' &&
+                cat != 'ENG' &&
+                cat != 'EOG' &&
+                cat != 'PC' &&
+                cat != 'PANTRY' &&
+                !code.contains('ENG');
+            if (isPass) {
+              targetCoach = coach;
+              break;
+            }
+          }
+        }
+      }
+
+      // 3. Extract seat number from text, removing coach code prefix if present
+      String textForSeat = rawText;
+      if (targetCoach != null) {
+        textForSeat = rawText.replaceAll(
+          RegExp(RegExp.escape(targetCoach.code), caseSensitive: false),
+          '',
+        );
+      }
+
+      final seatMatch = RegExp(r'\b\d{1,3}\b').firstMatch(textForSeat);
+      final seatNo = seatMatch?.group(0) ?? textForSeat.replaceAll(RegExp(r'[^\d]'), '');
+
       setState(() {
-        _searchedSeat = text;
+        if (targetCoach != null) {
+          _selectedCoach = targetCoach;
+        }
+        _searchedSeat = seatNo.isNotEmpty ? seatNo : rawText;
       });
+    } else {
+      setState(() => _searchedSeat = rawText);
     }
   }
 
@@ -443,12 +528,13 @@ class _CoachScreenState extends State<CoachScreen> {
                       ),
                       child: TextField(
                         controller: _seatCtrl,
-                        keyboardType: TextInputType.number,
+                        keyboardType: TextInputType.text,
                         style: GoogleFonts.inter(color: textPrimary, fontSize: 12.5),
+                        onChanged: (_) => _onSearchSeat(),
                         onSubmitted: (_) => _onSearchSeat(),
                         decoration: InputDecoration(
                           icon: const Icon(CupertinoIcons.search, size: 16, color: Color(0xFF0A84FF)),
-                          hintText: 'Highlight Seat / Berth (e.g. 42 or 18)',
+                          hintText: 'Highlight Seat / Berth (e.g. 42 or S1 18)',
                           hintStyle: GoogleFonts.inter(color: textSecondary, fontSize: 12),
                           border: InputBorder.none,
                           suffixIcon: _seatCtrl.text.isNotEmpty
@@ -483,6 +569,56 @@ class _CoachScreenState extends State<CoachScreen> {
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 10),
+              // Quick Seat Search Presets
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    Text(
+                      'Quick Highlight: ',
+                      style: GoogleFonts.inter(
+                        color: textSecondary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    ...['18 (Lower)', '25 (Middle)', '42 (Side Lower)', '63 (Side Upper)'].map((preset) {
+                      final seatDigits = preset.replaceAll(RegExp(r'\D'), '');
+                      final isCurrent = _searchedSeat == seatDigits;
+
+                      return GestureDetector(
+                        onTap: () {
+                          _seatCtrl.text = seatDigits;
+                          _onSearchSeat();
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isCurrent
+                                ? const Color(0xFF0A84FF)
+                                : (isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE5E5EA)),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isCurrent ? const Color(0xFF0A84FF) : borderCol,
+                            ),
+                          ),
+                          child: Text(
+                            preset,
+                            style: GoogleFonts.inter(
+                              color: isCurrent ? Colors.white : textPrimary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
               ),
             ],
           ),

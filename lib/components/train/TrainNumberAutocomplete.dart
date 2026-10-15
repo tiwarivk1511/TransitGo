@@ -221,29 +221,29 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
                   contentPadding: EdgeInsets.zero,
                   suffixIcon: _loading
                       ? const Padding(
-                          padding: EdgeInsets.all(10),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF0A84FF),
-                            ),
-                          ),
-                        )
+                    padding: EdgeInsets.all(10),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF0A84FF),
+                      ),
+                    ),
+                  )
                       : (widget.controller.text.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(
-                                  Icons.clear_rounded,
-                                  color: textSecondary,
-                                  size: 18,
-                                ),
-                                onPressed: () {
-                                  widget.controller.clear();
-                                  setState(() => _items = []);
-                                },
-                              )
-                            : null),
+                      ? IconButton(
+                    icon: Icon(
+                      Icons.clear_rounded,
+                      color: textSecondary,
+                      size: 18,
+                    ),
+                    onPressed: () {
+                      widget.controller.clear();
+                      setState(() => _items = []);
+                    },
+                  )
+                      : null),
                 ),
               ),
             ),

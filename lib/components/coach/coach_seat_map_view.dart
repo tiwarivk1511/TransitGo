@@ -108,20 +108,32 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
   }
 
   void _scrollToSeat(String seatNo) {
-    if (!_scrollController.hasClients) return;
-    final parsedSeat = int.tryParse(seatNo);
-    if (parsedSeat == null || parsedSeat < 1) return;
+    void executeScroll() {
+      if (!_scrollController.hasClients) return;
+      final cleanDigits = seatNo.replaceAll(RegExp(r'[^\d]'), '');
+      final parsedSeat = int.tryParse(cleanDigits.isNotEmpty ? cleanDigits : seatNo);
+      if (parsedSeat == null || parsedSeat < 1) return;
 
-    final approxIndex = ((parsedSeat - 1) / 8).floor();
-    final targetOffset = (approxIndex * 130.0).clamp(
-      0.0,
-      _scrollController.position.maxScrollExtent,
-    );
-    _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutCubic,
-    );
+      final approxIndex = ((parsedSeat - 1) / 8).floor();
+      final maxExtent = _scrollController.position.maxScrollExtent;
+      final targetOffset = (approxIndex * 130.0).clamp(0.0, maxExtent);
+
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    }
+
+    if (!_scrollController.hasClients) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) executeScroll();
+      });
+    } else {
+      executeScroll();
+    }
   }
 
   @override
@@ -678,7 +690,11 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
       status = 'AVAILABLE';
     }
 
-    final isSelected = _selectedSeat == seatNo;
+    final normSeatNo = seatNo.replaceAll(RegExp(r'[^\d]'), '');
+    final normSelected = (_selectedSeat ?? '').replaceAll(RegExp(r'[^\d]'), '');
+    final isSelected = seatNo == _selectedSeat ||
+        (normSeatNo.isNotEmpty && normSeatNo == normSelected);
+
     final isBooked = status == 'BOOKED' || status == 'OCCUPIED';
 
     Color boxBg = isDark ? const Color(0xFF16161C) : Colors.white;

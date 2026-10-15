@@ -997,26 +997,36 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     final firstSeq = routeStops.first.sequence;
     final lastSeq = routeStops.last.sequence;
     final currentCode = d.currentLocation.stationCode.trim().toUpperCase();
+    final currentStationName = d.currentLocation.stationName.trim().toLowerCase();
 
     for (var i = 0; i < routeStops.length; i++) {
       final stop = routeStops[i];
       final stCode = stop.stationCode.trim().toUpperCase();
-      final pos = geoByCode[stCode];
+      final stName = stop.stationName.trim().toLowerCase();
+
+      var pos = geoByCode[stCode];
+      if (pos == null) {
+        pos = _positionForStop(d, stop);
+      }
       if (pos == null) continue;
 
       final isOrigin = i == 0 || stop.sequence == firstSeq;
       final isDestination = i == routeStops.length - 1 || stop.sequence == lastSeq;
       final isHalt = stop.isHalt;
-      final isCurrent = stCode.isNotEmpty && stCode == currentCode;
+
+      final isCurrentByCode = stCode.isNotEmpty && (stCode == currentCode);
+      final isCurrentByName = stName.isNotEmpty && (stName == currentStationName);
+      final isCurrentByIndex = (d.currentIndex >= 0 && d.currentIndex < routeStops.length && i == d.currentIndex);
+      final isCurrent = isCurrentByCode || isCurrentByName || isCurrentByIndex;
 
       Color dotColor;
       Color labelBgColor;
       Color labelTextColor;
 
       if (isCurrent) {
-        dotColor = const Color(0xFF0A84FF);
-        labelBgColor = const Color(0xFF0A84FF);
-        labelTextColor = Colors.white;
+        dotColor = const Color(0xFFFF9F0A);
+        labelBgColor = const Color(0xFFFF9F0A);
+        labelTextColor = Colors.black;
       } else if (isOrigin) {
         dotColor = const Color(0xFF30D158);
         labelBgColor = const Color(0xFF30D158);
@@ -1026,16 +1036,35 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         labelBgColor = const Color(0xFFFF375F);
         labelTextColor = Colors.white;
       } else if (isHalt) {
-        dotColor = const Color(0xFFFFD60A);
-        labelBgColor = const Color(0xFFFFD60A);
-        labelTextColor = Colors.black;
+        dotColor = const Color(0xFF0A84FF);
+        labelBgColor = const Color(0xFF0A84FF);
+        labelTextColor = Colors.white;
       } else {
         dotColor = isDark ? const Color(0xFF3A3A3C) : const Color(0xFF1C1C1E);
         labelBgColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFF1C1C1E);
         labelTextColor = Colors.white;
       }
 
-      if (!isHalt && !isOrigin && !isDestination && !isCurrent) {
+      if (isCurrent) {
+        // Special Animated / Pulsing Live Station Point Marker for Current Station
+        markers.add(
+          Marker(
+            point: pos,
+            width: 140,
+            height: 70,
+            alignment: Alignment.topCenter,
+            child: _CurrentStationMarker(
+              stationCode: stop.stationCode,
+              stationName: stop.stationName,
+              platform: stop.platform,
+              isHalted: d.currentLocation.isHalt,
+            ),
+          ),
+        );
+        continue;
+      }
+
+      if (!isHalt && !isOrigin && !isDestination) {
         markers.add(
           Marker(
             point: pos,
@@ -1108,8 +1137,8 @@ class _TrainMapScreenState extends State<TrainMapScreen>
               ),
               const SizedBox(height: 2),
               Container(
-                width: isCurrent ? 14 : 10,
-                height: isCurrent ? 14 : 10,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
                   color: dotColor,
                   shape: BoxShape.circle,
@@ -1122,6 +1151,129 @@ class _TrainMapScreenState extends State<TrainMapScreen>
       );
     }
     return markers;
+  }
+}
+
+class _CurrentStationMarker extends StatefulWidget {
+  final String stationCode;
+  final String stationName;
+  final String? platform;
+  final bool isHalted;
+
+  const _CurrentStationMarker({
+    required this.stationCode,
+    required this.stationName,
+    this.platform,
+    this.isHalted = false,
+  });
+
+  @override
+  State<_CurrentStationMarker> createState() => _CurrentStationMarkerState();
+}
+
+class _CurrentStationMarkerState extends State<_CurrentStationMarker>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, child) {
+        final glowScale = 1.0 + (_pulseController.value * 0.28);
+        final glowAlpha = (0.8 - _pulseController.value * 0.4).clamp(0.2, 0.8);
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Prominent Glowing Current Station Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF9F0A),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF9F0A).withValues(alpha: 0.6),
+                    blurRadius: 10 * _pulseController.value + 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Colors.black,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '📍 ${widget.stationCode}${widget.platform != null && widget.platform!.isNotEmpty ? " (P${widget.platform})" : ""}',
+                    style: GoogleFonts.inter(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+
+            // Pulsing Live Station Point Dot
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                Transform.scale(
+                  scale: glowScale,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF9F0A).withValues(alpha: glowAlpha),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF9F0A),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black45, blurRadius: 4),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 
