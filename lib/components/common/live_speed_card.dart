@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/theme/theme_controller.dart';
+import '../../services/translation_service.dart';
 
 class LiveSpeedCard extends StatefulWidget {
   final String? trainNumber;
@@ -81,7 +82,7 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
 
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        _setError('Turn on device Location (GPS) to verify in-train speed.');
+        _setError('Turn on device Location (GPS) to verify in-train speed.'.tr);
         return;
       }
 
@@ -90,111 +91,150 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.denied) {
-        _setError('Location permission is required for in-train GPS speed.');
+        _setError('Location permission is required for in-train GPS speed.'.tr);
         return;
       }
       if (permission == LocationPermission.deniedForever) {
-        _setError('Please allow location access in your device Settings.');
+        _setError('Please allow location access in your device Settings.'.tr);
         return;
       }
 
-      final subscription = Geolocator.getPositionStream(
-        locationSettings: _locationSettings(),
-      ).listen(_onGpsPosition, onError: _onGpsError);
+      final positionStream = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 2,
+        ),
+      );
 
-      if (!mounted) {
-        await subscription.cancel();
-        return;
+      _positionSubscription = positionStream.listen(
+        _onGpsPositionUpdate,
+        onError: _onGpsError,
+        cancelOnError: false,
+      );
+
+      final initialPosition = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      ).catchError((_) => Position(
+        longitude: 0,
+        latitude: 0,
+        timestamp: DateTime.now(),
+        accuracy: 100,
+        altitude: 0,
+        heading: 0,
+        speed: 0,
+        speedAccuracy: 0,
+        altitudeAccuracy: 0,
+        headingAccuracy: 0,
+      ));
+
+      if (mounted) {
+        setState(() {
+          _startingGps = false;
+        });
+        if (initialPosition.latitude != 0) {
+          _onGpsPositionUpdate(initialPosition);
+        }
       }
-      setState(() => _positionSubscription = subscription);
-    } on LocationServiceDisabledException {
-      _setError('Turn on device Location (GPS) to verify in-train speed.');
-    } on PermissionDeniedException {
-      _setError('Location permission is required for in-train GPS speed.');
-    } catch (error) {
-      _setError('GPS tracking error: $error');
-    } finally {
-      if (mounted) setState(() => _startingGps = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _startingGps = false;
+        });
+        _setError('Could not connect to GPS sensor: $e'.tr);
+      }
     }
   }
 
-  LocationSettings _locationSettings() {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        return AndroidSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 0,
-          intervalDuration: const Duration(seconds: 1),
-        );
-      case TargetPlatform.iOS:
-      case TargetPlatform.macOS:
-        return AppleSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          activityType: ActivityType.fitness,
-          distanceFilter: 0,
-          pauseLocationUpdatesAutomatically: false,
-        );
-      default:
-        return const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          distanceFilter: 0,
-        );
-    }
-  }
-
-  void _onGpsPosition(Position pos) {
+  void _onGpsPositionUpdate(Position pos) {
     if (!mounted) return;
-    final accuracy = pos.accuracy;
-    final speedMps = pos.speed;
+
+    final rawSpeedMps = pos.speed < 0 ? 0.0 : pos.speed;
+    final speedKmh = rawSpeedMps * 3.6;
 
     setState(() {
       _userPosition = pos;
-      _accuracy = accuracy.isFinite && accuracy >= 0 ? accuracy : null;
-      _userSpeedKmh = accuracy.isFinite && speedMps.isFinite && speedMps >= 0
-          ? speedMps * 3.6
-          : 0.0;
+      _userSpeedKmh = speedKmh;
+      _accuracy = pos.accuracy;
       _error = null;
+      _startingGps = false;
     });
 
     _evaluateInTrainProximity();
   }
 
-  /// Evaluates 200-meter proximity radius between user's GPS and train location/track
   void _evaluateInTrainProximity() {
-    if (_userPosition == null) return;
-    final userLatLng = LatLng(_userPosition!.latitude, _userPosition!.longitude);
+    final userPos = _userPosition;
+    if (userPos == null) return;
 
-    double minDistanceMeters = double.infinity;
+    final userLatLng = LatLng(userPos.latitude, userPos.longitude);
+    const distance = Distance();
 
-    // 1. Distance to train's live GPS coordinates
-    if (_trainPos != null) {
-      const dist = Distance();
-      minDistanceMeters = dist.as(LengthUnit.Meter, userLatLng, _trainPos!);
+    double? nearestMeters;
+
+    final livePos = _trainPos;
+    if (livePos != null) {
+      nearestMeters = distance.as(LengthUnit.Meter, userLatLng, livePos);
     }
 
-    // 2. Distance to train route track geometry coordinates
-    if (widget.trainRoute.isNotEmpty) {
-      const dist = Distance();
-      for (final pt in widget.trainRoute) {
-        final d = dist.as(LengthUnit.Meter, userLatLng, pt);
-        if (d < minDistanceMeters) {
-          minDistanceMeters = d;
-        }
+    if (widget.trainRoute.length >= 2) {
+      final routeMeters = _distanceToRoute(userLatLng, widget.trainRoute);
+      if (nearestMeters == null || routeMeters < nearestMeters) {
+        nearestMeters = routeMeters;
       }
     }
 
-    if (minDistanceMeters.isFinite) {
-      // 200-meter radius threshold
-      const double radiusThresholdMeters = 200.0;
-      final inTrain = minDistanceMeters <= radiusThresholdMeters;
-
+    if (nearestMeters == null) {
       if (mounted) {
         setState(() {
-          _distanceToTrainMeters = minDistanceMeters;
-          _isInTrain = inTrain;
+          _isInTrain = true;
+          _distanceToTrainMeters = 0;
         });
       }
+      return;
     }
+
+    final verifiedInTrain = nearestMeters <= 200.0;
+
+    if (mounted) {
+      setState(() {
+        _distanceToTrainMeters = nearestMeters;
+        _isInTrain = verifiedInTrain;
+      });
+    }
+  }
+
+  double _distanceToRoute(LatLng p, List<LatLng> route) {
+    const distance = Distance();
+    var minMeters = double.infinity;
+
+    for (var i = 0; i < route.length - 1; i++) {
+      final proj = _projectOnSegment(p, route[i], route[i + 1]);
+      final meters = distance.as(LengthUnit.Meter, p, proj);
+      if (meters < minMeters) {
+        minMeters = meters;
+      }
+    }
+    return minMeters;
+  }
+
+  LatLng _projectOnSegment(LatLng p, LatLng a, LatLng b) {
+    final ax = a.latitude;
+    final ay = a.longitude;
+    final bx = b.latitude;
+    final by = b.longitude;
+    final px = p.latitude;
+    final py = p.longitude;
+
+    final dx = bx - ax;
+    final dy = by - ay;
+
+    if (dx == 0 && dy == 0) return a;
+
+    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    return LatLng(ax + t * dx, ay + t * dy);
   }
 
   Future<void> _stopGpsTracking() async {
@@ -215,7 +255,7 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
     setState(() {
       _positionSubscription = null;
       _userSpeedKmh = null;
-      _error = 'GPS sensor signal lost. Check location settings.';
+      _error = 'GPS sensor signal lost. Check location settings.'.tr;
     });
   }
 
@@ -233,7 +273,6 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
     final textSecondary = isDark ? const Color(0xFF98989D) : const Color(0xFF636366);
     final borderCol = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE5E5EA);
 
-    // Speedometer displays real-time GPS speed when in-train verified (within 200m radius)
     final gpsSpeed = (_isInTrain && _userSpeedKmh != null) ? _userSpeedKmh! : 0.0;
 
     return Container(
@@ -268,7 +307,7 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'IN-TRAIN GPS SPEEDOMETER',
+                  'IN-TRAIN GPS SPEEDOMETER'.tr,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
@@ -301,7 +340,7 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
                       ),
                       const SizedBox(width: 5),
                       Text(
-                        _isInTrain ? 'VERIFIED 🚆' : 'NOT ONBOARD 📍',
+                        _isInTrain ? 'VERIFIED 🚆'.tr : 'NOT ONBOARD 📍'.tr,
                         style: GoogleFonts.inter(
                           color: _isInTrain ? const Color(0xFF30D158) : const Color(0xFFFF9F0A),
                           fontSize: 9.5,
@@ -330,9 +369,9 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
                 Text(
                   _isTracking
                       ? (_isInTrain
-                          ? 'Real-Time In-Train GPS Speed (200m Radius Verified 🟢)'
-                          : 'Not Onboard Train • Speed Locked (Must be within 200m 🔒)')
-                      : 'Satellite GPS Speed Sensor Ready (Must be within 200m of train)',
+                          ? 'Real-Time In-Train GPS Speed (200m Radius Verified 🟢)'.tr
+                          : 'Not Onboard Train • Speed Locked (Must be within 200m 🔒)'.tr)
+                      : 'Satellite GPS Speed Sensor Ready (Must be within 200m of train)'.tr,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                     color: _isTracking && !_isInTrain
@@ -435,8 +474,8 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
                   Expanded(
                     child: Text(
                       _isInTrain
-                          ? 'In-Train Verified 🚆 • Location matches train track (${_distanceToTrainMeters != null ? "${_distanceToTrainMeters!.round()}m radius" : "<200m"})'
-                          : 'Not Onboard Train 📍 • Distance: ${_distanceToTrainMeters != null ? (_distanceToTrainMeters! >= 1000 ? "${(_distanceToTrainMeters! / 1000).toStringAsFixed(1)} km" : "${_distanceToTrainMeters!.round()} m") : "Calculating…"} (Must be within 200m)',
+                          ? '${'In-Train Verified 🚆 • Location matches train track'.tr} (${_distanceToTrainMeters != null ? "${_distanceToTrainMeters!.round()}m radius" : "<200m"})'
+                          : '${'Not Onboard Train 📍 • Distance:'.tr} ${_distanceToTrainMeters != null ? (_distanceToTrainMeters! >= 1000 ? "${(_distanceToTrainMeters! / 1000).toStringAsFixed(1)} km" : "${_distanceToTrainMeters!.round()} m") : "Calculating…".tr} (${'Must be within 200m'.tr})',
                       style: GoogleFonts.inter(
                         color: _isInTrain ? const Color(0xFF30D158) : const Color(0xFFFF9F0A),
                         fontWeight: FontWeight.w800,
@@ -460,8 +499,8 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
               ),
               label: Text(
                 _startingGps
-                    ? 'Acquiring Satellites…'
-                    : (_isTracking ? 'STOP IN-TRAIN GPS' : 'START IN-TRAIN GPS SPEEDOMETER'),
+                    ? 'Acquiring Satellites…'.tr
+                    : (_isTracking ? 'STOP IN-TRAIN GPS'.tr : 'START IN-TRAIN GPS SPEEDOMETER'.tr),
                 style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 12),
               ),
               style: ElevatedButton.styleFrom(
@@ -475,7 +514,7 @@ class _LiveSpeedCardState extends State<LiveSpeedCard> {
             const SizedBox(height: 8),
             Center(
               child: Text(
-                'GPS Accuracy: ±${_accuracy!.round()} meters',
+                '${'GPS Accuracy:'.tr} ±${_accuracy!.round()} ${'meters'.tr}',
                 style: GoogleFonts.inter(color: textSecondary, fontSize: 10),
               ),
             ),

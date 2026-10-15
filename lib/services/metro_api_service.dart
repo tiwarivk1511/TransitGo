@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as latlong show LatLng;
 
+import '../core/utils/security_utils.dart';
 import '../data/models/metro_network.dart';
 import 'remote_config_service.dart';
 
@@ -37,6 +38,8 @@ class MetroApiService {
     'jaipur': 'jai',
     'lucknow': 'luc',
     'agra': 'agr',
+    'pune': 'pun',
+    'pun': 'pune',
     'navi_mumbai': 'nav',
     'gandhinagar': 'gan',
     'meerut': 'mee',
@@ -193,7 +196,7 @@ class MetroApiService {
     final srcSlug = formatYoMetroStationSlug(sourceStation, network.cityName);
     final dstSlug = formatYoMetroStationSlug(destinationStation, network.cityName);
     final slug = 'from-$srcSlug-to-$dstSlug';
-    final url = 'https://yometro.com/api/route.php?slug=$slug';
+    final url = '${SecurityUtils.yoMetroRouteUrl}$slug';
 
     try {
       final response = await _client.get(
@@ -327,14 +330,26 @@ class MetroApiService {
     );
   }
 
-  /// Fetches dynamic active stations for a city from TrackMyMetro REST API (stations-{code}.json)
+  /// Syncs & pre-caches active metro stations for ALL cities from Firebase Remote Config & web sources
+  static Future<void> syncAllCitiesMetroStations() async {
+    final allCityCodes = trackMyMetroCityCodes.values.toSet();
+    for (final code in allCityCodes) {
+      try {
+        await fetchTrackMyMetroStations(code);
+      } catch (e) {
+        if (kDebugMode) debugPrint('[MetroApiService] Pre-sync error for city $code: $e');
+      }
+    }
+  }
+
+  /// Fetches dynamic active stations for a city from Firebase Remote Config (parameter: stations_{code}) or TrackMyMetro REST API
   static Future<List<Map<String, dynamic>>> fetchTrackMyMetroStations(String cityCode) async {
     final code = cityCode.trim().toLowerCase();
     if (_trackMyMetroStationsCache.containsKey(code)) {
       return _trackMyMetroStationsCache[code]!;
     }
 
-    // 1. Try Firebase Remote Config first (parameter key: metro_stations_{code})
+    // 1. Fetch from Firebase Remote Config first (parameter key format: stations_{code})
     try {
       final remoteConfigJson = RemoteConfigService.getMetroStationsJson(code);
       if (remoteConfigJson.isNotEmpty) {
@@ -344,13 +359,15 @@ class MetroApiService {
           rawList = decoded;
         } else if (decoded is Map && decoded['stations'] is List) {
           rawList = decoded['stations'] as List;
+        } else if (decoded is Map && decoded['data'] is List) {
+          rawList = decoded['data'] as List;
         }
 
         final results = <Map<String, dynamic>>[];
         for (final item in rawList) {
           if (item is Map) {
             final m = Map<String, dynamic>.from(item);
-            final name = (m['name'] ?? '').toString().trim();
+            final name = (m['name'] ?? m['stationName'] ?? m['station_name'] ?? '').toString().trim();
             if (name.isNotEmpty) {
               results.add(m);
             }
@@ -358,16 +375,17 @@ class MetroApiService {
         }
 
         if (results.isNotEmpty) {
+          if (kDebugMode) debugPrint('[RemoteConfig] Successfully loaded ${results.length} metro stations for stations_$code');
           _trackMyMetroStationsCache[code] = results;
           return results;
         }
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('[RemoteConfig] fetchMetroStations error for $code: $e');
+      if (kDebugMode) debugPrint('[RemoteConfig] fetchMetroStations error for stations_$code: $e');
     }
 
     // 2. TrackMyMetro REST API call
-    final url = 'https://trackmymetro.com/data/stations-$code.json?v=1.6';
+    final url = '${SecurityUtils.trackMyMetroBaseUrl}$code.json?v=1.6';
     try {
       final response = await http.get(
         Uri.parse(url),

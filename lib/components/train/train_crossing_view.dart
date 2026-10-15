@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/theme_controller.dart';
 import '../../data/models/train.dart';
-import '../../data/sources/railradar_source.dart';
+import '../../services/translation_service.dart';
 import '../../screens/train_details/train_details_screen.dart';
 
 class TrainCrossing {
@@ -84,7 +84,6 @@ class TrainCrossingView extends StatelessWidget {
     final textSecondary = isDark ? Colors.white54 : const Color(0xFF8E8E93);
     final borderCol = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE5E5EA);
 
-    // Build route station order index map from searched train's route
     final routeOrderMap = <String, int>{};
     for (var i = 0; i < routeStops.length; i++) {
       final stop = routeStops[i];
@@ -92,7 +91,6 @@ class TrainCrossingView extends StatelessWidget {
       routeOrderMap[stop.stationName.toUpperCase()] = i;
     }
 
-    // Group crossings by station location
     final Map<String, List<TrainCrossing>> stationGroupMap = {};
     for (final c in crossings) {
       final key = c.locationName.isNotEmpty
@@ -101,7 +99,6 @@ class TrainCrossingView extends StatelessWidget {
       stationGroupMap.putIfAbsent(key, () => []).add(c);
     }
 
-    // Ensure searched user train is inserted at its current location
     final userCurrentKey = (currentStationName != null && currentStationName!.isNotEmpty)
         ? currentStationName!
         : (currentStationCode != null && currentStationCode!.isNotEmpty ? currentStationCode! : '');
@@ -126,7 +123,6 @@ class TrainCrossingView extends StatelessWidget {
       }
     }
 
-    // Sort station keys according to searched train's route sequence
     final stationKeys = stationGroupMap.keys.toList()
       ..sort((a, b) {
         final codeA = a.toUpperCase();
@@ -139,7 +135,6 @@ class TrainCrossingView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // RailRadar Corridor Header Banner
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
@@ -155,7 +150,7 @@ class TrainCrossingView extends StatelessWidget {
                   const Icon(CupertinoIcons.arrow_down, color: Color(0xFF0A84FF), size: 14),
                   const SizedBox(width: 4),
                   Text(
-                    '↓ Same Dir',
+                    '↓ ${'Same Dir'.tr}',
                     style: GoogleFonts.inter(
                       color: const Color(0xFF0A84FF),
                       fontWeight: FontWeight.w900,
@@ -165,7 +160,7 @@ class TrainCrossingView extends StatelessWidget {
                 ],
               ),
               Text(
-                'Crossings & Encounters',
+                'Crossings & Encounters'.tr,
                 style: GoogleFonts.inter(
                   color: textSecondary,
                   fontWeight: FontWeight.w900,
@@ -178,7 +173,7 @@ class TrainCrossingView extends StatelessWidget {
                   const Icon(CupertinoIcons.arrow_up, color: Color(0xFF30D158), size: 14),
                   const SizedBox(width: 4),
                   Text(
-                    '↑ Opposite',
+                    '↑ ${'Opposite'.tr}',
                     style: GoogleFonts.inter(
                       color: const Color(0xFF30D158),
                       fontWeight: FontWeight.w900,
@@ -247,12 +242,12 @@ class TrainCrossingView extends StatelessWidget {
           const Icon(CupertinoIcons.arrow_2_squarepath, color: Color(0xFF0A84FF), size: 40),
           const SizedBox(height: 12),
           Text(
-            'No active corridor train crossings detected.',
+            'No active corridor train crossings detected.'.tr,
             style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
           ),
           const SizedBox(height: 4),
           Text(
-            'Train encounters are tracked live as trains progress along shared corridors.',
+            'Train encounters are tracked live as trains progress along shared corridors.'.tr,
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(color: textSecondary, fontSize: 11),
           ),
@@ -261,9 +256,6 @@ class TrainCrossingView extends StatelessWidget {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // RAILRADAR CORRIDOR LADDER ROW (Station Pill + Same Dir + Opposite)
-  // ═══════════════════════════════════════════════════════════════════════
   Widget _buildCorridorStationRow({
     required BuildContext context,
     required String stationName,
@@ -278,7 +270,6 @@ class TrainCrossingView extends StatelessWidget {
   }) {
     return Column(
       children: [
-        // Station Pill Badge on Railway Ladder
         Center(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
@@ -299,459 +290,117 @@ class TrainCrossingView extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: isUserLocation ? Colors.white : textSecondary,
-                    shape: BoxShape.circle,
-                  ),
+                Icon(
+                  CupertinoIcons.location_solid,
+                  color: isUserLocation ? Colors.white : const Color(0xFF0A84FF),
+                  size: 13,
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  stationName.toUpperCase(),
+                  stationName.tr,
                   style: GoogleFonts.inter(
-                    color: isUserLocation ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF1C1C1E)),
+                    color: isUserLocation ? Colors.white : textPrimary,
                     fontWeight: FontWeight.w900,
-                    fontSize: 10,
-                    letterSpacing: 0.8,
+                    fontSize: 11.5,
                   ),
                 ),
-                if (isUserLocation) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'LIVE 🚆',
-                      style: GoogleFonts.inter(
-                        color: const Color(0xFF0A84FF),
-                        fontWeight: FontWeight.w900,
-                        fontSize: 8,
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
         ),
-
-        const SizedBox(height: 6),
-
-        // Corridor Split Row (Same Dir Left | Ladder Middle | Opposite Dir Right)
+        const SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left Column: Same Direction Trains (↓)
             Expanded(
-              child: sameDir.isEmpty
-                  ? const SizedBox.shrink()
-                  : Column(
-                      children: sameDir.map((t) => _buildTrainCard(context, t, isLeft: true, isDark: isDark, cardBg: cardBg, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol)).toList(),
-                    ),
-            ),
-
-            // Middle: Vertical Railway Ladder Track Graphic (|||||||||)
-            Container(
-              width: 24,
-              padding: const EdgeInsets.symmetric(vertical: 4),
               child: Column(
-                children: List.generate(
-                  5,
-                  (i) => Container(
-                    margin: const EdgeInsets.symmetric(vertical: 2),
-                    height: 2,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF475569),
-                      borderRadius: BorderRadius.circular(1),
-                    ),
-                  ),
-                ),
+                children: sameDir.map((c) => _trainCardItem(context, c, isDark, cardBg, textPrimary, textSecondary, borderCol)).toList(),
               ),
             ),
-
-            // Right Column: Opposite Direction Trains (↑)
+            const SizedBox(width: 10),
             Expanded(
-              child: oppositeDir.isEmpty
-                  ? const SizedBox.shrink()
-                  : Column(
-                      children: oppositeDir.map((t) => _buildTrainCard(context, t, isLeft: false, isDark: isDark, cardBg: cardBg, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol)).toList(),
-                    ),
+              child: Column(
+                children: oppositeDir.map((c) => _trainCardItem(context, c, isDark, cardBg, textPrimary, textSecondary, borderCol)).toList(),
+              ),
             ),
           ],
         ),
-
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
       ],
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // RAILRADAR CORRIDOR TRAIN CARD ITEM
-  // ═══════════════════════════════════════════════════════════════════════
-  Widget _buildTrainCard(
+  Widget _trainCardItem(
     BuildContext context,
-    TrainCrossing item, {
-    required bool isLeft,
-    required bool isDark,
-    required Color cardBg,
-    required Color textPrimary,
-    required Color textSecondary,
-    required Color borderCol,
-  }) {
-    final isUser = item.isUserTrain || item.trainNumber == currentTrainNumber;
+    TrainCrossing c,
+    bool isDark,
+    Color cardBg,
+    Color textPrimary,
+    Color textSecondary,
+    Color borderCol,
+  ) {
+    final isUser = c.isUserTrain;
+    final color = isUser
+        ? const Color(0xFF0A84FF)
+        : (c.isOpposite ? const Color(0xFF30D158) : const Color(0xFFFF9F0A));
 
-    if (isUser) {
-      return _AnimatedUserTrainCard(
-        item: item,
-        isLeft: isLeft,
-        isDark: isDark,
-        textPrimary: textPrimary,
-      );
-    }
-
-    return _CrossingTrainCardItem(
-      item: item,
-      isLeft: isLeft,
-      isDark: isDark,
-      cardBg: cardBg,
-      textPrimary: textPrimary,
-      textSecondary: textSecondary,
-      borderCol: borderCol,
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// CROSSING TRAIN CARD ITEM WITH ON-THE-FLY OFFICIAL NAME RESOLUTION
-// ═══════════════════════════════════════════════════════════════════════
-class _CrossingTrainCardItem extends StatefulWidget {
-  final TrainCrossing item;
-  final bool isLeft;
-  final bool isDark;
-  final Color cardBg;
-  final Color textPrimary;
-  final Color textSecondary;
-  final Color borderCol;
-
-  const _CrossingTrainCardItem({
-    required this.item,
-    required this.isLeft,
-    required this.isDark,
-    required this.cardBg,
-    required this.textPrimary,
-    required this.textSecondary,
-    required this.borderCol,
-  });
-
-  @override
-  State<_CrossingTrainCardItem> createState() => _CrossingTrainCardItemState();
-}
-
-class _CrossingTrainCardItemState extends State<_CrossingTrainCardItem> {
-  static final Map<String, String> _resolvedNameCache = {};
-  String? _displayName;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkAndResolveName();
-  }
-
-  @override
-  void didUpdateWidget(_CrossingTrainCardItem oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _checkAndResolveName();
-  }
-
-  void _checkAndResolveName() {
-    final num = widget.item.trainNumber.trim();
-    final name = widget.item.trainName.trim();
-
-    if (_resolvedNameCache.containsKey(num)) {
-      _displayName = _resolvedNameCache[num];
-      return;
-    }
-
-    if (name.isNotEmpty && !name.startsWith('Train ') && name != 'Express') {
-      _displayName = name;
-      _resolvedNameCache[num] = name;
-      return;
-    }
-
-    _displayName = name.isNotEmpty ? name : 'Train $num';
-
-    // Fetch official train name from Open Web RailRadar API: https://railradar.in/app/v1/trains/{num}/live
-    RailRadarSource.fetchTrainName(num).then((data) {
-      final realName = data['name']?.toString().trim() ?? '';
-      if (realName.isNotEmpty && !realName.startsWith('Train ') && realName != 'Express') {
-        _resolvedNameCache[num] = realName;
-        if (mounted) {
-          setState(() => _displayName = realName);
-        }
-      }
-    }).catchError((_) {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final item = widget.item;
-    final isLeft = widget.isLeft;
-    final isDark = widget.isDark;
-    final textPrimary = widget.textPrimary;
-    final borderCol = widget.borderCol;
-
-    final delayed = item.delayMinutes > 0;
-    final delayText = delayed ? '+${item.delayMinutes}m' : '';
-
-    final arrowSymbol = isLeft ? '↓' : '↑';
-    final arrowColor = isLeft ? const Color(0xFF0A84FF) : const Color(0xFF30D158);
-    final trainTitle = _displayName ?? item.trainName;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFFFFFFF),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderCol, width: 1),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 6,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              if (item.trainNumber.isNotEmpty) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TrainDetailsScreen(
-                      trainNumber: item.trainNumber,
-                      trainName: trainTitle,
-                    ),
-                  ),
-                );
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: isLeft ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                children: [
-                  // Train Number + Arrow + Delay Pill
-                  Row(
-                    mainAxisAlignment: isLeft ? MainAxisAlignment.end : MainAxisAlignment.start,
-                    children: [
-                      Text(
-                        '$arrowSymbol ${item.trainNumber}',
-                        style: GoogleFonts.inter(
-                          color: arrowColor,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                      if (delayed) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFF9F0A).withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            delayText,
-                            style: GoogleFonts.inter(
-                              color: const Color(0xFFFF9F0A),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 9,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // Full Official Train Name
-                  Text(
-                    trainTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: isLeft ? TextAlign.right : TextAlign.left,
-                    style: GoogleFonts.inter(
-                      color: textPrimary,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 11,
-                      height: 1.2,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// ANIMATED PULSING SEARCHED TRAIN CARD ITEM
-// ═══════════════════════════════════════════════════════════════════════
-class _AnimatedUserTrainCard extends StatefulWidget {
-  final TrainCrossing item;
-  final bool isLeft;
-  final bool isDark;
-  final Color textPrimary;
-
-  const _AnimatedUserTrainCard({
-    required this.item,
-    required this.isLeft,
-    required this.isDark,
-    required this.textPrimary,
-  });
-
-  @override
-  State<_AnimatedUserTrainCard> createState() => _AnimatedUserTrainCardState();
-}
-
-class _AnimatedUserTrainCardState extends State<_AnimatedUserTrainCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulseCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _pulseCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final delayed = widget.item.delayMinutes > 0;
-    final delayText = delayed ? '+${widget.item.delayMinutes}m' : '';
-
-    return AnimatedBuilder(
-      animation: _pulseCtrl,
-      builder: (context, _) {
-        final animVal = _pulseCtrl.value;
-        final glowRadius = 6.0 + (animVal * 8.0);
-        final borderAlpha = 0.5 + (animVal * 0.5);
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                const Color(0xFF0A84FF).withValues(alpha: 0.28 + (animVal * 0.12)),
-                const Color(0xFF00F2FE).withValues(alpha: 0.18 + (animVal * 0.12)),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: const Color(0xFF00F2FE).withValues(alpha: borderAlpha),
-              width: 2.0,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF00F2FE).withValues(alpha: 0.35 * animVal),
-                blurRadius: glowRadius,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment:
-                  widget.isLeft ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              children: [
-                // Header Badge
-                Row(
-                  mainAxisAlignment: widget.isLeft
-                      ? MainAxisAlignment.end
-                      : MainAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0A84FF),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(
-                        'SEARCHED TRAIN 🚆',
-                        style: GoogleFonts.inter(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 8.5,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                    if (delayed) ...[
-                      const SizedBox(width: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF9F0A),
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Text(
-                          delayText,
-                          style: GoogleFonts.inter(
-                            color: Colors.black,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 8.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 5),
-
-                // Train Number & Name
-                Text(
-                  '${widget.item.trainNumber} • ${widget.item.trainName}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: widget.isLeft ? TextAlign.right : TextAlign.left,
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                    height: 1.25,
-                  ),
-                ),
-              ],
+    return GestureDetector(
+      onTap: () {
+        if (c.trainNumber.isEmpty) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrainDetailsScreen(
+              trainNumber: c.trainNumber,
+              trainName: c.trainName,
             ),
           ),
         );
       },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isUser ? color.withValues(alpha: 0.15) : cardBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isUser ? color : borderCol,
+            width: isUser ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    c.trainNumber,
+                    style: GoogleFonts.inter(color: color, fontWeight: FontWeight.w900, fontSize: 10),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  c.time,
+                  style: GoogleFonts.inter(color: textSecondary, fontSize: 9.5, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              c.trainName.tr,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w800, fontSize: 11.5),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/theme_controller.dart';
+import '../../services/translation_service.dart';
 
 class FeatureIntro extends StatelessWidget {
   final String title;
@@ -44,7 +45,7 @@ class FeatureIntro extends StatelessWidget {
                     border: Border.all(color: accent.withValues(alpha: 0.3)),
                   ),
                   child: Text(
-                    'TRANSITGO  /  RAIL, SIMPLIFIED',
+                    'TRANSITGO  /  RAIL, SIMPLIFIED'.tr,
                     style: GoogleFonts.inter(
                       color: accent,
                       fontSize: 8,
@@ -54,7 +55,7 @@ class FeatureIntro extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  title,
+                  title.tr,
                   style: GoogleFonts.inter(
                     color: textPrimary,
                     fontSize: 27,
@@ -65,7 +66,7 @@ class FeatureIntro extends StatelessWidget {
                 ),
                 const SizedBox(height: 7),
                 Text(
-                  subtitle,
+                  subtitle.tr,
                   style: GoogleFonts.inter(
                     color: textSecondary,
                     fontSize: 11.5,

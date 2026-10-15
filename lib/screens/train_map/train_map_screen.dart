@@ -118,183 +118,130 @@ class _TrainMapScreenState extends State<TrainMapScreen>
   void _onData(TrainTracking d) {
     if (!mounted) return;
     final target = _trainLatLng(d);
+
     setState(() {
-      _data = d;
       _loading = false;
-      _error = null;
+      _data = d;
       _lastFetch = DateTime.now();
+      _error = null;
     });
+
     _animateToPosition(target);
 
-    // First successful load with geometry → fit route
-    if (!_didInitialFit && d.routeGeometry.length >= 2) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fitRoute());
-    } else if (!_didInitialFit && target != null) {
+    if (!_didInitialFit && _mapReady) {
       _didInitialFit = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _mapReady) {
-          _mapController.move(target, 12);
-        }
-      });
+      if (d.routeGeometry.length >= 2) {
+        _fitRoute();
+      } else if (target != null) {
+        _mapController.move(target, 12);
+      }
     }
+  }
+
+  LatLng? _trainLatLng(TrainTracking data) {
+    final current = data.currentLocation;
+    if (current.hasGpsCoordinates) {
+      return current.latLng;
+    }
+
+    final fromSegment = _positionFromCurrentSegment(data);
+    if (fromSegment != null) return fromSegment;
+
+    final fromStationSeq = _positionFromStationSequences(data);
+    if (fromStationSeq != null) return fromStationSeq;
+
+    final fromProgress = _positionFromProgress(data);
+    if (fromProgress != null) return fromProgress;
+
+    if (data.routeGeometry.isNotEmpty) {
+      final fraction = data.progressFraction.clamp(0.0, 1.0);
+      return _positionAtRouteProgress(data.routeGeometry, fraction);
+    }
+    return null;
   }
 
   void _animateToPosition(LatLng? target) {
-    if (target == null) {
-      _positionController.stop();
-      _positionFrom = null;
-      _positionTo = null;
-      if (_displayedTrainPosition != null) {
-        setState(() => _displayedTrainPosition = null);
+    if (target == null) return;
+    final startPos = _displayedTrainPosition ?? target;
+    if ((startPos.latitude - target.latitude).abs() < 0.0001 &&
+        (startPos.longitude - target.longitude).abs() < 0.0001) {
+      setState(() => _displayedTrainPosition = target);
+      if (_followTrain && _mapReady) {
+        _mapController.move(target, _mapController.camera.zoom);
       }
       return;
     }
-    final current = _displayedTrainPosition;
-    if (current == null) {
-      setState(() => _displayedTrainPosition = target);
-      return;
-    }
-    if (current.latitude == target.latitude &&
-        current.longitude == target.longitude) {
-      return;
-    }
 
-    _positionController.stop();
-    _positionFrom = current;
+    _positionFrom = startPos;
     _positionTo = target;
-    _positionController.forward(from: 0);
+    _positionController.forward(from: 0.0);
   }
 
   void _updateAnimatedPosition() {
-    final from = _positionFrom;
-    final to = _positionTo;
-    if (!mounted || from == null || to == null) return;
+    if (_positionFrom == null || _positionTo == null || !mounted) return;
+    final value = Curves.easeInOutCubic.transform(_positionController.value);
+    final lat =
+        _positionFrom!.latitude +
+        (_positionTo!.latitude - _positionFrom!.latitude) * value;
+    final lng =
+        _positionFrom!.longitude +
+        (_positionTo!.longitude - _positionFrom!.longitude) * value;
+    final animatedPos = LatLng(lat, lng);
 
-    final t = Curves.easeInOut.transform(_positionController.value);
-    final position = LatLng(
-      from.latitude + (to.latitude - from.latitude) * t,
-      from.longitude + (to.longitude - from.longitude) * t,
-    );
-    setState(() => _displayedTrainPosition = position);
+    setState(() => _displayedTrainPosition = animatedPos);
 
     if (_followTrain && _mapReady) {
-      _mapController.move(position, _mapController.camera.zoom);
+      _mapController.move(animatedPos, _mapController.camera.zoom);
     }
   }
 
   void _fitRoute() {
-    final d = _data;
-    if (d == null || !_mapReady) return;
-    final points = _getRoutePoints(d);
+    if (!_mapReady || _data == null) return;
+    final points = _getRoutePoints(_data!);
     if (points.isEmpty) return;
-    if (points.length == 1) {
-      _mapController.move(points.first, 12);
-      _didInitialFit = true;
-      return;
-    }
-    final valid = points.where((p) => p.latitude.isFinite && p.longitude.isFinite).toList();
-    if (valid.length < 2) return;
 
-    try {
-      final bounds = LatLngBounds.fromPoints(valid);
-      _mapController.fitCamera(
-        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(56)),
-      );
-      _didInitialFit = true;
-    } catch (e) {
-      if (kDebugMode) debugPrint('[FitRouteError] LatLngBounds failed: $e');
-    }
+    final bounds = LatLngBounds.fromPoints(points);
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.fromLTRB(40, 80, 40, 240),
+      ),
+    );
   }
 
   void _centerOnTrain() {
-    final d = _data;
-    if (d == null) return;
-    final loc = _trainLatLng(d);
-    if (loc != null && _mapReady) {
-      _mapController.move(loc, 12);
-      setState(() => _followTrain = true);
+    setState(() => _followTrain = true);
+    final pos = _displayedTrainPosition ?? (_data != null ? _trainLatLng(_data!) : null);
+    if (pos != null && _mapReady) {
+      _mapController.move(pos, 13);
     }
   }
 
-  LatLng? _trainLatLng(TrainTracking d) {
-    final curCode = d.currentLocation.stationCode.trim().toUpperCase();
-    final curName = d.currentLocation.stationName.trim().toLowerCase();
-    final curSeq = d.currentLocation.sequence;
-    final status = d.status.toLowerCase();
-    final isHaltOrAtStation = d.currentLocation.isHalt ||
-        status == 'at-station' ||
-        status == 'not-started' ||
-        status == 'reached' ||
-        status == 'completed' ||
-        (d.currentLocation.speedKmh != null && d.currentLocation.speedKmh! <= 0);
-
-    // 1. If Train is AT A STATION (Halted, At-Station, Not Started, or Speed 0)
-    //    MUST return the EXACT station coordinates directly!
-    if (isHaltOrAtStation || curCode.isNotEmpty) {
-      // First check geoStops
-      for (final stop in d.geoStops) {
-        if (stop.latLng != null) {
-          if ((curSeq > 0 && stop.sequence == curSeq) ||
-              (curCode.isNotEmpty && stop.code.toUpperCase() == curCode) ||
-              (curName.isNotEmpty && stop.name.toLowerCase() == curName)) {
-            return stop.latLng;
-          }
-        }
-      }
-
-      // Check route stops
-      if (d.route.isNotEmpty) {
-        for (final stop in d.route) {
-          if ((curSeq > 0 && stop.sequence == curSeq) ||
-              (curCode.isNotEmpty && stop.stationCode.toUpperCase() == curCode) ||
-              (curName.isNotEmpty && stop.stationName.toLowerCase() == curName)) {
-            final geoMatch = _positionForStop(d, stop);
-            if (geoMatch != null) return geoMatch;
-          }
-        }
-      }
-
-      // Check source or destination
-      if (status == 'not-started' && d.source?.latLng != null) {
-        return d.source!.latLng;
-      }
-      if ((status == 'reached' || status == 'completed') && d.destination?.latLng != null) {
-        return d.destination!.latLng;
-      }
+  LatLng? _positionFromProgress(TrainTracking data) {
+    if (data.routeGeometry.length >= 2) {
+      return _positionAtRouteProgress(
+        data.routeGeometry,
+        data.progressFraction.clamp(0.0, 1.0),
+      );
     }
-
-    // 2. If Train has GPS coordinates in live payload
-    if (d.currentLocation.hasGpsCoordinates && d.currentLocation.latLng != null) {
-      return d.currentLocation.latLng;
-    }
-
-    // 3. If Train is RUNNING between stations, interpolate along current segment
-    final byCurrentSegment = _positionFromCurrentSegment(d);
-    if (byCurrentSegment != null) return byCurrentSegment;
-
-    // 4. Interpolate by covered station distance along geometry track
-    final covered = d.currentLocation.distanceFromOriginKm;
-    if (covered != null && covered.isFinite && covered >= 0) {
-      final byStationDistance = _positionAtStationDistance(d, covered);
-      if (byStationDistance != null) return byStationDistance;
-    }
-
-    // 5. Fallback to origin or first station
-    if (d.source?.latLng != null) return d.source!.latLng;
-    if (d.geoStops.isNotEmpty && d.geoStops.first.latLng != null) {
-      return d.geoStops.first.latLng;
-    }
-
     return null;
   }
 
-  LatLng? _positionAtStationDistance(TrainTracking data, double coveredKm) {
+  LatLng? _positionFromStationSequences(TrainTracking data) {
+    final location = data.currentLocation;
+    final totalKm = data.distance ?? 0;
+    final coveredKm = location.distanceFromOriginKm ?? 0;
+    if (totalKm <= 0 || coveredKm <= 0) return null;
+
     final positionedStops = <({double distanceKm, LatLng position})>[];
     for (final stop in data.route) {
-      if (!stop.distance.isFinite || stop.distance < 0) continue;
-      final position = _positionForStop(data, stop);
-      if (position == null) continue;
-      positionedStops.add((distanceKm: stop.distance, position: position));
+      final pos = _positionForStop(data, stop);
+      if (pos != null) {
+        positionedStops.add((
+          distanceKm: stop.distance.toDouble(),
+          position: pos,
+        ));
+      }
     }
     if (positionedStops.length < 2) return null;
 
@@ -780,7 +727,7 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         ),
         Positioned(
           right: 12,
-          bottom: 215, // Raised above bottom card so all 3 buttons stay 100% visible
+          bottom: 215,
           child: Column(
             children: [
               _mapButton(
@@ -983,12 +930,10 @@ class _TrainMapScreenState extends State<TrainMapScreen>
   }
 
   List<LatLng> _getRoutePoints(TrainTracking d) {
-    // 1. High-resolution decoded railway track polyline geometry anchored to station stops
     if (d.routeGeometry.length >= 2) {
       return _snapStationAnchorsToTrack(d.routeGeometry, d);
     }
 
-    // 2. Sequential station coordinates connecting official journey stops with smooth Catmull-Rom railway curvature
     final rawPoints = <LatLng>[];
     final seenKeys = <String>{};
 
@@ -1064,8 +1009,6 @@ class _TrainMapScreenState extends State<TrainMapScreen>
       final isHalt = stop.isHalt;
       final isCurrent = stCode.isNotEmpty && stCode == currentCode;
 
-      // Color specifications requested by user:
-      // Origin = Green, Destination = Red, Halts = Yellow, Intermediate Non-Halts = Black
       Color dotColor;
       Color labelBgColor;
       Color labelTextColor;
@@ -1075,28 +1018,23 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         labelBgColor = const Color(0xFF0A84FF);
         labelTextColor = Colors.white;
       } else if (isOrigin) {
-        // GREEN FOR ORIGIN
         dotColor = const Color(0xFF30D158);
         labelBgColor = const Color(0xFF30D158);
         labelTextColor = Colors.white;
       } else if (isDestination) {
-        // RED FOR DESTINATION
         dotColor = const Color(0xFFFF375F);
         labelBgColor = const Color(0xFFFF375F);
         labelTextColor = Colors.white;
       } else if (isHalt) {
-        // YELLOW FOR COMMERCIAL HALT STATIONS
         dotColor = const Color(0xFFFFD60A);
         labelBgColor = const Color(0xFFFFD60A);
         labelTextColor = Colors.black;
       } else {
-        // BLACK FOR NON-HALT INTERMEDIATE STATIONS
         dotColor = isDark ? const Color(0xFF3A3A3C) : const Color(0xFF1C1C1E);
         labelBgColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFF1C1C1E);
         labelTextColor = Colors.white;
       }
 
-      // Non-halt small dot marker for passing stations
       if (!isHalt && !isOrigin && !isDestination && !isCurrent) {
         markers.add(
           Marker(
@@ -1119,7 +1057,6 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         continue;
       }
 
-      // Commercial Halts, Origin, Destination, and Current Station Pill Markers
       markers.add(
         Marker(
           point: pos,
@@ -1300,7 +1237,6 @@ class _InfoCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: Train Number & Name + Live Speed Badge
           Row(
             children: [
               Container(
@@ -1396,7 +1332,6 @@ class _InfoCard extends StatelessWidget {
           Divider(color: ThemeController.instance.isDarkMode ? Colors.white10 : const Color(0xFFE5E5EA), height: 1),
           const SizedBox(height: 10),
 
-          // Row 2: Next Stop & Destination Station
           Row(
             children: [
               Expanded(
@@ -1450,7 +1385,6 @@ class _InfoCard extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // Row 3: Covered vs Total Distance & Progress Bar
           Column(
             children: [
               Row(

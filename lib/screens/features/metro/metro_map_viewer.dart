@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../core/theme/theme_controller.dart';
+import '../../../core/utils/security_utils.dart';
 
 class MetroMapViewer extends StatefulWidget {
   final String cityName;
@@ -177,7 +178,7 @@ class _MetroMapViewerState extends State<MetroMapViewer> {
       citySlug = 'mumbai';
     }
 
-    return 'https://yometro.com/images/maps/$citySlug-metro-route-map.svg';
+    return '${SecurityUtils.yoMetroMapBaseUrl}$citySlug-metro-route-map.svg';
   }
 
   @override

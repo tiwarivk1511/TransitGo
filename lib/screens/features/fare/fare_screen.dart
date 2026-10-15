@@ -98,21 +98,42 @@ class _FareScreenState extends State<FareScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _trainCtrl.dispose();
-    _fromCtrl.dispose();
-    _toCtrl.dispose();
-    super.dispose();
-  }
-
   Future<void> _fetch() async {
-    final t = _trainCtrl.text.trim().split(' - ').first;
-    final f = _from?.code ?? _fromCtrl.text.trim().toUpperCase();
-    final to = _to?.code ?? _toCtrl.text.trim().toUpperCase();
+    final trainQuery = _trainCtrl.text.trim();
+    final trainNumberMatch = RegExp(r'\b\d{5}\b').firstMatch(trainQuery);
+    final trainNo = trainNumberMatch?.group(0) ??
+        (trainQuery.length == 5 && int.tryParse(trainQuery) != null
+            ? trainQuery
+            : '');
 
-    if (t.isEmpty || f.isEmpty || to.isEmpty) {
-      setState(() => _error = 'Please fill train number, source & destination.');
+    var fromCode = _from?.code ?? '';
+    var toCode = _to?.code ?? '';
+
+    if (fromCode.isEmpty) {
+      final match = RegExp(r'\(([A-Z0-9]+)\)').firstMatch(_fromCtrl.text);
+      if (match != null) {
+        fromCode = match.group(1)!;
+      } else if (_fromCtrl.text.trim().isNotEmpty) {
+        fromCode = _fromCtrl.text.trim().toUpperCase();
+      }
+    }
+
+    if (toCode.isEmpty) {
+      final match = RegExp(r'\(([A-Z0-9]+)\)').firstMatch(_toCtrl.text);
+      if (match != null) {
+        toCode = match.group(1)!;
+      } else if (_toCtrl.text.trim().isNotEmpty) {
+        toCode = _toCtrl.text.trim().toUpperCase();
+      }
+    }
+
+    if (trainNo.isEmpty) {
+      setState(() => _error = 'Please enter a valid 5-digit train number');
+      return;
+    }
+
+    if (fromCode.isEmpty || toCode.isEmpty) {
+      setState(() => _error = 'Please select origin and destination stations');
       return;
     }
 
@@ -122,12 +143,12 @@ class _FareScreenState extends State<FareScreen> {
       _data = null;
     });
 
-    final formattedDate = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final formattedDate = DateFormat('dd-MM-yyyy').format(_selectedDate);
 
     final d = await FareService.fetch(
-      trainNumber: t,
-      from: f,
-      to: to,
+      trainNumber: trainNo,
+      from: fromCode,
+      to: toCode,
       date: formattedDate,
       classCode: _class,
       quota: _quota,
@@ -138,24 +159,27 @@ class _FareScreenState extends State<FareScreen> {
     if (d != null) {
       await OfflineCache.addHistory(
         'fare',
-        '$t $f->$to',
-        label: '$t • $f ➔ $to ($_class)',
+        '$trainNo-$fromCode-$toCode',
+        label: '$trainNo: $fromCode → $toCode ($_class)',
         data: {
-          'trainNumber': t,
-          'fromCode': f,
-          'toCode': to,
-          'classCode': _class,
-          'quotaCode': _quota,
-          'journeyDate': formattedDate,
+          'trainNumber': trainNo,
+          'fromCode': fromCode,
+          'toCode': toCode,
+          'class': _class,
+          'quota': _quota,
         },
       );
     }
 
     if (!mounted) return;
+
     setState(() {
       _loading = false;
       _data = d;
-      if (d == null) _error = 'Fare data unavailable for $t ($f ➔ $to).';
+      if (d == null) {
+        _error =
+            'Fare calculation unavailable for this route and class combination.';
+      }
     });
   }
 
@@ -165,36 +189,11 @@ class _FareScreenState extends State<FareScreen> {
       initialDate: _selectedDate,
       firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 120)),
-      builder: (context, child) {
-        final isDark = ThemeController.instance.isDarkMode;
-        return Theme(
-          data: isDark
-              ? ThemeData.dark().copyWith(
-                  colorScheme: const ColorScheme.dark(
-                    primary: Color(0xFF0A84FF),
-                    onPrimary: Colors.white,
-                    surface: Color(0xFF16161C),
-                    onSurface: Colors.white,
-                  ),
-                )
-              : ThemeData.light().copyWith(
-                  colorScheme: const ColorScheme.light(
-                    primary: Color(0xFF0A84FF),
-                    onPrimary: Colors.white,
-                    surface: Colors.white,
-                    onSurface: Color(0xFF1C1C1E),
-                  ),
-                ),
-          child: child!,
-        );
-      },
     );
-
-    if (picked != null && picked != _selectedDate) {
+    if (picked != null && mounted) {
       setState(() {
         _selectedDate = picked;
         _data = null;
-        _error = null;
       });
     }
   }

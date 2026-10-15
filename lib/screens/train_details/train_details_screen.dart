@@ -15,11 +15,10 @@ import '../../core/theme/theme_controller.dart';
 import '../../data/models/coach.dart';
 import '../../data/models/train.dart';
 import '../../data/sources/railradar_source.dart';
+import '../../services/analytics_service.dart';
 import '../../services/train_service.dart';
 import '../../services/wake_me_up_service.dart';
 import '../train_map/train_map_screen.dart';
-
-import '../../services/analytics_service.dart';
 
 class TrainDetailsScreen extends StatefulWidget {
   final String trainNumber;
@@ -39,7 +38,6 @@ class TrainDetailsScreen extends StatefulWidget {
 
 class _TrainDetailsScreenState extends State<TrainDetailsScreen>
     with WidgetsBindingObserver {
-  // Detail View Mode: 0 = Live Timeline, 1 = Crossings (XING), 2 = Coach Formation
   int _detailTab = 0;
 
   TrainTracking? _data;
@@ -51,7 +49,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
   final ScrollController _detailScrollController = ScrollController();
   bool _hasScrolledToCurrent = false;
 
-  // Train Crossings (XING) State
   List<TrainCrossing> _crossings = [];
   bool _loadingCrossings = false;
 
@@ -98,58 +95,12 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
     _fetchCrossings();
   }
 
-  void _resolveTrainName() {
-    final cleanNo = widget.trainNumber.trim().split(' - ').first;
-    RailRadarSource.fetchSingleTrainName(cleanNo)
-        .then((info) {
-          final name = info['name']?.toString().trim() ?? '';
-          if (name.isNotEmpty && !name.startsWith('Train ') && mounted) {
-            setState(() => _fetchedTrainName = name);
-          }
-        })
-        .catchError((_) {});
-  }
-
   @override
   void dispose() {
-    _detailScrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
+    _detailScrollController.dispose();
     super.dispose();
-  }
-
-  Future<void> _fetchCrossings() async {
-    if (_loadingCrossings) return;
-    setState(() => _loadingCrossings = true);
-    try {
-      final raw = await TrainService.trainCrossings(widget.trainNumber);
-      if (mounted) {
-        setState(() {
-          _crossings = raw.map((e) => TrainCrossing.fromJson(e)).toList();
-          _loadingCrossings = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingCrossings = false);
-    }
-  }
-
-  void _scrollToCurrentStation() {
-    if (_data == null || !_detailScrollController.hasClients) return;
-    final curIdx = _data!.currentIndex;
-    if (curIdx < 0) return;
-
-    // Timeline station item height is ~110px. Scroll so current live station appears centered
-    final offset = (curIdx * 110.0 - 100.0).clamp(
-      0.0,
-      _detailScrollController.position.maxScrollExtent,
-    );
-
-    _detailScrollController.animateTo(
-      offset,
-      duration: const Duration(milliseconds: 750),
-      curve: Curves.fastOutSlowIn,
-    );
   }
 
   @override
@@ -162,38 +113,80 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
     }
   }
 
+  Future<void> _resolveTrainName() async {
+    final info = await RailRadarSource.fetchTrainName(widget.trainNumber);
+    if (!mounted) return;
+
+    final resolvedName = info['name']?.toString().trim();
+    if (resolvedName != null &&
+        resolvedName.isNotEmpty &&
+        !resolvedName.startsWith('Train ')) {
+      setState(() => _fetchedTrainName = resolvedName);
+    }
+  }
+
+  Future<void> _fetchCrossings() async {
+    if (_loadingCrossings) return;
+    setState(() => _loadingCrossings = true);
+    try {
+      final res = await RailRadarSource.trainCrossings(widget.trainNumber);
+      final list = res.map((json) => TrainCrossing.fromJson(json)).toList();
+      if (!mounted) return;
+      setState(() {
+        _crossings = list;
+        _loadingCrossings = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingCrossings = false);
+    }
+  }
+
   void _subscribe() {
     _sub?.cancel();
     if (mounted) setState(() => _loading = _data == null);
 
-    _sub =
-        TrainService.stream(
-          widget.trainNumber,
-          interval: const Duration(seconds: 30),
-        ).listen(
-          (data) {
-            if (!mounted) return;
-            setState(() {
-              _data = data;
-              _loading = false;
-              _error = null;
-              _lastFetch = DateTime.now();
-            });
-            if (!_hasScrolledToCurrent) {
-              _hasScrolledToCurrent = true;
-              Future.delayed(const Duration(milliseconds: 400), () {
-                if (mounted) _scrollToCurrentStation();
-              });
-            }
-          },
-          onError: (e) {
-            if (!mounted) return;
-            setState(() {
-              _loading = false;
-              if (_data == null) _error = 'Failed to load live status.';
-            });
-          },
-        );
+    _sub = TrainService.stream(widget.trainNumber).listen(
+      (data) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _data = data;
+          _lastFetch = DateTime.now();
+          _error = null;
+        });
+
+        if (!_hasScrolledToCurrent) {
+          _hasScrolledToCurrent = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _scrollToCurrentStation();
+          });
+        }
+      },
+      onError: (err) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = 'Unable to fetch live tracking data.';
+        });
+      },
+    );
+  }
+
+  void _scrollToCurrentStation() {
+    if (_data == null || !_detailScrollController.hasClients) return;
+    final idx = _data!.currentIndex;
+    if (idx <= 0) return;
+
+    final targetOffset = (idx * 68.0).clamp(
+      0.0,
+      _detailScrollController.position.maxScrollExtent,
+    );
+    _detailScrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _manualRefresh() async {
@@ -428,7 +421,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
                                     100,
                                   ),
                                   children: [
-                                    // Top Live Status Banner Header
                                     _StatusHeader(
                                       data: _data!,
                                       lastFetch: _lastFetch,
@@ -438,7 +430,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
                                     ),
                                     const SizedBox(height: 16),
 
-                                    // Live Speedometer Telemetry Card
                                     LiveSpeedCard(
                                       trainLivePosition:
                                           _data!
@@ -450,7 +441,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
                                     ),
                                     const SizedBox(height: 16),
 
-                                    // Cupertino Segmented Control Tab Switcher
                                     _tabSegmentHeader(
                                       isDark,
                                       cardBg,
@@ -459,7 +449,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
                                     ),
                                     const SizedBox(height: 16),
 
-                                    // Tab 0: Live Timeline
                                     if (_detailTab == 0) ...[
                                       _JourneySummary(
                                         data: _data!,
@@ -485,7 +474,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
                                         textSecondary: textSecondary,
                                       ),
                                     ]
-                                    // Tab 1: Train Crossings (XING) & Encounters
                                     else if (_detailTab == 1)
                                       TrainCrossingView(
                                         currentTrainNumber: widget.trainNumber,
@@ -499,7 +487,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
                                         loading: _loadingCrossings,
                                         onRefresh: _fetchCrossings,
                                       )
-                                    // Tab 2: Coach Rake Formation
                                     else if (_detailTab == 2)
                                       if (_data!.coachComposition.isNotEmpty)
                                         _CoachStrip(
@@ -616,9 +603,6 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════
-// HEADER
-// ═════════════════════════════════════════════════════════════════════
 class _StatusHeader extends StatelessWidget {
   final TrainTracking data;
   final DateTime? lastFetch;

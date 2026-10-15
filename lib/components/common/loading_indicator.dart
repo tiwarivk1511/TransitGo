@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../services/translation_service.dart';
+
 class LoadingIndicator extends StatelessWidget {
   final Color? color;
   final double size;
@@ -30,7 +32,7 @@ class LoadingIndicator extends StatelessWidget {
           ),
           if (label != null) ...[
             const SizedBox(height: 14),
-            Text(label!,
+            Text(label!.tr,
                 style: GoogleFonts.inter(
                     color: Colors.white54,
                     fontSize: 12,

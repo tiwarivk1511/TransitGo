@@ -11,6 +11,7 @@ import '../../../core/utils/responsive_helper.dart';
 import '../../../data/models/metro_network.dart';
 import '../../../services/analytics_service.dart';
 import '../../../services/metro_api_service.dart';
+import '../../../services/remote_config_service.dart';
 import 'metro_interactive_map_view.dart';
 
 class MetroNetworksScreen extends StatefulWidget {
@@ -76,15 +77,23 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
       setState(() => _isSyncingWebData = true);
     }
     try {
+      // 1. Force refresh Firebase Remote Config parameters from server
+      await RemoteConfigService.refresh();
+
+      // 2. Sync selected city network
       final liveNet = await MetroApiService.fetchDynamicTrackMyMetroNetwork(
         _selectedNetwork,
       );
+
+      // 3. Background pre-fetch & cache ALL cities metro stations from Remote Config
+      unawaited(MetroApiService.syncAllCitiesMetroStations());
+
       if (mounted) {
         setState(() {
           _selectedNetwork = liveNet;
           _isSyncingWebData = false;
           _lastSyncStatus =
-              '🟢 Live TrackMyMetro Active (${liveNet.allStations.length} Stations • ${liveNet.lines.length} Lines)';
+              '🟢 Live Metro Active (${liveNet.allStations.length} Stations • ${liveNet.lines.length} Lines)';
 
           if (_sourceStation != null && _destinationStation != null) {
             _calculateRoute();
@@ -95,7 +104,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
       if (mounted) {
         setState(() {
           _isSyncingWebData = false;
-          _lastSyncStatus = '🟢 Live TrackMyMetro Connected';
+          _lastSyncStatus = '🟢 Live Metro Connected';
         });
       }
     }

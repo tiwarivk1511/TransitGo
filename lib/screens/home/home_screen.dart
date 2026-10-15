@@ -7,9 +7,11 @@ import '../../components/common/apple_glass_card.dart';
 import '../../components/common/modern_background.dart';
 import '../../components/station/station_autocomplete.dart';
 import '../../components/train/TrainNumberAutocomplete.dart';
+import '../../core/localization/language_controller.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/utils/responsive_helper.dart';
 import '../../data/models/station.dart';
+import '../../services/analytics_service.dart';
 import '../features/alerts/alerts_screen.dart';
 import '../features/coach/coach_screen.dart';
 import '../features/fare/fare_screen.dart';
@@ -22,8 +24,6 @@ import '../features/radar/radar_screen.dart';
 import '../features/station_info/station_info_screen.dart';
 import '../train_details/train_details_screen.dart';
 import '../train_search/train_search_screen.dart';
-
-import '../../services/analytics_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -164,15 +164,29 @@ class _HomeScreenState extends State<HomeScreen> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'TransitGO',
-                                style: GoogleFonts.inter(
-                                  color: textPrimary,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Transit',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: textPrimary,
+                                      letterSpacing: -1.2,
+                                    ),
+                                  ),
+                                  Text(
+                                    'GO',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: const Color(0xFF0A84FF),
+                                      letterSpacing: -1.2,
+                                    ),
+                                  ),
+                                ],
+                              ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.2),
                               Text(
                                 'Indian Railways & Metros Live',
                                 style: GoogleFonts.inter(
@@ -184,56 +198,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                           const Spacer(),
-
-                          // LIVE Badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(
-                                0xFF30D158,
-                              ).withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: const Color(
-                                  0xFF30D158,
-                                ).withValues(alpha: 0.3),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF30D158),
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Color(0xFF30D158),
-                                        blurRadius: 6,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'LIVE',
-                                  style: GoogleFonts.inter(
-                                    color: const Color(0xFF30D158),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(width: 8),
 
                           // Theme Toggle Button (Sun / Moon)
                           InkWell(
@@ -262,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 20),
 
                       Text(
-                        'Plan your next\ntrain journey',
+                        LanguageController.instance.translate('plan_next_journey'),
                         style: GoogleFonts.inter(
                           fontSize: ResponsiveHelper.isMobile(context)
                               ? 30
@@ -275,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Find trains, track live status, and explore metro lines.',
+                        LanguageController.instance.translate('find_trains_subtitle'),
                         style: GoogleFonts.inter(
                           fontSize: 13,
                           color: textSecondary,
@@ -304,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  'PLAN A JOURNEY',
+                                  LanguageController.instance.translate('plan_a_journey'),
                                   style: GoogleFonts.inter(
                                     color: textPrimary,
                                     fontSize: 11,
@@ -327,7 +291,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             const SizedBox(height: 16),
                             StationAutocomplete(
                               controller: _fromCtrl,
-                              label: 'Origin Station',
+                              label: LanguageController.instance.translate('origin_station'),
                               hint: 'e.g. NDLS',
                               icon: CupertinoIcons.location_north_fill,
                               onStationSelected: (s) => setState(() {
@@ -342,7 +306,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             StationAutocomplete(
                               controller: _toCtrl,
-                              label: 'Destination Station',
+                              label: LanguageController.instance.translate('destination_station'),
                               hint: 'e.g. MMCT',
                               icon: CupertinoIcons.location_fill,
                               onStationSelected: (s) => setState(() {
@@ -362,7 +326,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   size: 15,
                                 ),
                                 label: Text(
-                                  'Swap',
+                                  LanguageController.instance.translate('swap'),
                                   style: GoogleFonts.inter(
                                     color: const Color(0xFF0A84FF),
                                     fontWeight: FontWeight.bold,
@@ -410,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
-                                      'Find Trains',
+                                      LanguageController.instance.translate('find_trains'),
                                       style: GoogleFonts.inter(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w800,
@@ -431,8 +395,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 24),
 
                       _sectionHeading(
-                        'Track a train',
-                        'Get live running status by name or number',
+                        LanguageController.instance.translate('track_a_train'),
+                        LanguageController.instance.translate('track_train_subtitle'),
                         CupertinoIcons.antenna_radiowaves_left_right,
                         textPrimary,
                         textSecondary,
@@ -491,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                                 child: Text(
-                                  'Track Train',
+                                  LanguageController.instance.translate('track_train_btn'),
                                   style: GoogleFonts.inter(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w800,
@@ -505,8 +469,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 24),
 
                       _sectionHeading(
-                        'Explore TransitGo',
-                        'Everything you need for your journey',
+                        LanguageController.instance.translate('explore_transitgo'),
+                        LanguageController.instance.translate('explore_subtitle'),
                         CupertinoIcons.square_grid_2x2_fill,
                         textPrimary,
                         textSecondary,
@@ -523,8 +487,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Expanded(
                                   child: _bentoCard(
                                     icon: CupertinoIcons.ticket_fill,
-                                    title: 'PNR Status',
-                                    subtitle: 'Check booking & seat status',
+                                    title: LanguageController.instance.translate('pnr_status'),
+                                    subtitle: LanguageController.instance.translate('pnr_subtitle'),
                                     badgeText: 'PNR CHECK',
                                     color: const Color(0xFFFF9F0A),
                                     cardColor: cardColor,
@@ -539,8 +503,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: _bentoCard(
                                     icon: CupertinoIcons
                                         .antenna_radiowaves_left_right,
-                                    title: 'Live Station',
-                                    subtitle: 'Real-time train arrivals',
+                                    title: LanguageController.instance.translate('live_station'),
+                                    subtitle: LanguageController.instance.translate('live_station_subtitle'),
                                     badgeText: 'LIVE RADAR',
                                     color: const Color(0xFFFF453A),
                                     cardColor: cardColor,
@@ -563,8 +527,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: _bentoCard(
                                     icon: CupertinoIcons
                                         .antenna_radiowaves_left_right,
-                                    title: 'Live Radar Map',
-                                    subtitle: '2,000+ active trains live',
+                                    title: LanguageController.instance.translate('live_radar_map'),
+                                    subtitle: LanguageController.instance.translate('radar_subtitle'),
                                     badgeText: 'RADAR 📡',
                                     color: const Color(0xFFFF375F),
                                     cardColor: cardColor,
@@ -579,8 +543,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: _bentoCard(
                                     icon:
                                         CupertinoIcons.square_stack_3d_up_fill,
-                                    title: 'Coach Position',
-                                    subtitle: 'Platform & rake layout',
+                                    title: LanguageController.instance.translate('coach_position'),
+                                    subtitle: LanguageController.instance.translate('coach_subtitle'),
                                     badgeText: 'COACH',
                                     color: const Color(0xFF0A84FF),
                                     cardColor: cardColor,
@@ -602,8 +566,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: _bentoCard(
                                     icon:
                                         CupertinoIcons.money_dollar_circle_fill,
-                                    title: 'Train Fare',
-                                    subtitle: 'Class & ticket prices',
+                                    title: LanguageController.instance.translate('train_fare'),
+                                    subtitle: LanguageController.instance.translate('fare_subtitle'),
                                     badgeText: 'FARES',
                                     color: const Color(0xFF64D2FF),
                                     cardColor: cardColor,
@@ -639,8 +603,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Expanded(
                                   child: _bentoCard(
                                     icon: CupertinoIcons.tram_fill,
-                                    title: 'Metro Networks',
-                                    subtitle: 'City lines & fares',
+                                    title: LanguageController.instance.translate('metro_networks'),
+                                    subtitle: LanguageController.instance.translate('metro_subtitle'),
                                     badgeText: 'METRO',
                                     color: const Color(0xFF30D158),
                                     cardColor: cardColor,
@@ -655,8 +619,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Expanded(
                                   child: _bentoCard(
                                     icon: CupertinoIcons.building_2_fill,
-                                    title: 'Station Details',
-                                    subtitle: 'Facilities & helpline',
+                                    title: LanguageController.instance.translate('station_details'),
+                                    subtitle: LanguageController.instance.translate('station_details_subtitle'),
                                     badgeText: 'STATION',
                                     color: const Color(0xFF0A84FF),
                                     cardColor: cardColor,
@@ -677,8 +641,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Expanded(
                                   child: _bentoCard(
                                     icon: CupertinoIcons.time_solid,
-                                    title: 'History',
-                                    subtitle: 'Recent searches',
+                                    title: LanguageController.instance.translate('history'),
+                                    subtitle: LanguageController.instance.translate('history_subtitle'),
                                     badgeText: 'RECENT',
                                     color: textSecondary,
                                     cardColor: cardColor,
@@ -692,8 +656,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Expanded(
                                   child: _bentoCard(
                                     icon: CupertinoIcons.ellipsis,
-                                    title: 'More Features',
-                                    subtitle: 'Settings & tools',
+                                    title: LanguageController.instance.translate('more_features'),
+                                    subtitle: LanguageController.instance.translate('more_subtitle'),
                                     badgeText: 'MORE',
                                     color: textSecondary,
                                     cardColor: cardColor,
@@ -829,7 +793,7 @@ class _HomeScreenState extends State<HomeScreen> {
       border: Border.all(color: borderColor, width: 1.0),
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,

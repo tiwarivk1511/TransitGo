@@ -18,10 +18,14 @@ class _MoreScreenState extends State<MoreScreen> {
   Widget build(BuildContext context) {
     final isDark = ThemeController.instance.isDarkMode;
     final bgColor = isDark ? const Color(0xFF09090C) : const Color(0xFFF2F2F7);
-    final cardColor = isDark ? const Color(0xFF16161C) : const Color(0xFFFFFFFF);
+    final cardColor = isDark
+        ? const Color(0xFF16161C)
+        : const Color(0xFFFFFFFF);
     final textPrimary = isDark ? Colors.white : const Color(0xFF1C1C1E);
     final textSecondary = isDark ? Colors.white54 : const Color(0xFF8E8E93);
-    final borderCol = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE5E5EA);
+    final borderCol = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : const Color(0xFFE5E5EA);
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -42,7 +46,9 @@ class _MoreScreenState extends State<MoreScreen> {
         actions: [
           IconButton(
             icon: Icon(
-              isDark ? CupertinoIcons.sun_max_fill : CupertinoIcons.moon_stars_fill,
+              isDark
+                  ? CupertinoIcons.sun_max_fill
+                  : CupertinoIcons.moon_stars_fill,
               color: isDark ? const Color(0xFFFFD60A) : const Color(0xFF0A84FF),
               size: 18,
             ),
@@ -60,11 +66,11 @@ class _MoreScreenState extends State<MoreScreen> {
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
           children: [
-            FeatureIntro(
+            const FeatureIntro(
               title: 'More for\nyour journey.',
               subtitle: 'Helpful tools and information, all in one place.',
               icon: CupertinoIcons.sparkles,
-              accent: const Color(0xFF0A84FF),
+              accent: Color(0xFF0A84FF),
             ),
 
             // APPEARANCE SECTION
@@ -80,7 +86,14 @@ class _MoreScreenState extends State<MoreScreen> {
                 ),
               ),
             ),
-            _themeToggleTile(context, cardColor, textPrimary, textSecondary, borderCol, isDark),
+            _themeToggleTile(
+              context,
+              cardColor,
+              textPrimary,
+              textSecondary,
+              borderCol,
+              isDark,
+            ),
 
             const SizedBox(height: 12),
             Padding(
@@ -180,7 +193,14 @@ class _MoreScreenState extends State<MoreScreen> {
     );
   }
 
-  Widget _themeToggleTile(BuildContext c, Color cardColor, Color textPrimary, Color textSecondary, Color borderCol, bool isDark) {
+  Widget _themeToggleTile(
+    BuildContext c,
+    Color cardColor,
+    Color textPrimary,
+    Color textSecondary,
+    Color borderCol,
+    bool isDark,
+  ) {
     return Container(
       decoration: BoxDecoration(
         color: cardColor,
@@ -190,16 +210,23 @@ class _MoreScreenState extends State<MoreScreen> {
       child: Material(
         color: Colors.transparent,
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 4,
+          ),
           leading: Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: (isDark ? const Color(0xFFFFD60A) : const Color(0xFF0A84FF)).withValues(alpha: 0.15),
+              color:
+                  (isDark ? const Color(0xFFFFD60A) : const Color(0xFF0A84FF))
+                      .withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(13),
             ),
             child: Icon(
-              isDark ? CupertinoIcons.sun_max_fill : CupertinoIcons.moon_stars_fill,
+              isDark
+                  ? CupertinoIcons.sun_max_fill
+                  : CupertinoIcons.moon_stars_fill,
               color: isDark ? const Color(0xFFFFD60A) : const Color(0xFF0A84FF),
               size: 20,
             ),
@@ -218,7 +245,7 @@ class _MoreScreenState extends State<MoreScreen> {
           ),
           trailing: CupertinoSwitch(
             value: !isDark,
-            activeColor: const Color(0xFF0A84FF),
+            activeTrackColor: const Color(0xFF0A84FF),
             onChanged: (_) {
               setState(() {
                 ThemeController.instance.toggleTheme();
@@ -240,54 +267,53 @@ class _MoreScreenState extends State<MoreScreen> {
     Color textPrimary,
     Color textSecondary,
     Color borderCol,
-  ) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 9),
-        child: Container(
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: borderCol),
+  ) => Padding(
+    padding: const EdgeInsets.only(bottom: 9),
+    child: Container(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderCol),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 4,
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 4,
-              ),
-              leading: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: Icon(i, color: accent, size: 20),
-              ),
-              title: Text(
-                t,
-                style: GoogleFonts.inter(
-                  color: textPrimary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                ),
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Text(
-                  s,
-                  style: GoogleFonts.inter(color: textSecondary, fontSize: 10),
-                ),
-              ),
-              trailing: Icon(
-                CupertinoIcons.chevron_right,
-                color: textSecondary,
-                size: 14,
-              ),
-              onTap: () {},
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Icon(i, color: accent, size: 20),
+          ),
+          title: Text(
+            t,
+            style: GoogleFonts.inter(
+              color: textPrimary,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
             ),
           ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              s,
+              style: GoogleFonts.inter(color: textSecondary, fontSize: 10),
+            ),
+          ),
+          trailing: Icon(
+            CupertinoIcons.chevron_right,
+            color: textSecondary,
+            size: 14,
+          ),
+          onTap: () {},
         ),
-      );
+      ),
+    ),
+  );
 }

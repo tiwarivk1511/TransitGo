@@ -10,6 +10,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'app.dart';
 import 'core/cache/offline_cache.dart';
+import 'core/localization/language_controller.dart';
 import 'core/theme/theme_controller.dart';
 import 'core/utils/permission_helper.dart';
 import 'data/sources/station_source.dart';
@@ -88,6 +89,9 @@ Future<void> main() async {
   // 5. Parallel init — each is independently wrapped.
   // ─────────────────────────────────────────────────────────────
   await Future.wait([
+    LanguageController.instance.init().catchError((e) {
+      debugPrint('[startup] LanguageController init failed: $e');
+    }),
     ThemeController.instance.init().catchError((e) {
       debugPrint('[startup] ThemeController init failed: $e');
     }),

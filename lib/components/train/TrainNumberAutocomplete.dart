@@ -102,7 +102,6 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
     final seen = <String>{};
     final merged = <Map<String, dynamic>>[];
 
-    // 1. Direct Single Train Name Lookup using RailRadarSource.fetchSingleTrainName(cleanNo)
     final digits = q.replaceAll(RegExp(r'\D'), '');
     if (digits.length >= 2) {
       final single = await RailRadarSource.fetchSingleTrainName(digits);
@@ -120,155 +119,147 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
       }
     }
 
-    // 2. Open Web Search & Candidate Lookup
-    final remote = await RailRadarSource.searchTrains(q, limit: 10);
-    final recents = await OfflineCache.getRecentTrains(limit: 30);
-
-    for (final raw in remote) {
-      final no = (raw['number'] ?? raw['train_number'] ?? raw['train_no'] ?? '')
-          .toString()
-          .trim();
-      if (no.isEmpty || !seen.add(no)) continue;
-
-      final nameRaw = (raw['name'] ?? raw['trainName'] ?? raw['train_name'] ?? '').toString().trim();
-      final name = (nameRaw.isNotEmpty && !nameRaw.startsWith('Train ')) ? nameRaw : 'Train $no';
-
-      final src = _extractStation(raw, [
-        'source',
-        'sourceName',
-        'src',
-        'source_station_name',
-        'src_stn_name',
-        'from_station_name',
-        'from'
-      ]);
-      final dst = _extractStation(raw, [
-        'destination',
-        'dst',
-        'dest',
-        'destName',
-        'destination_station_name',
-        'to_station_name',
-        'destination_code'
-      ]);
-
-      merged.add({
-        'number': no,
-        'name': name,
-        'source': src,
-        'destination': dst,
-      });
-      if (merged.length >= 10) break;
-    }
-
-    for (final raw in recents) {
-      if (merged.length >= 10) break;
-      final no = (raw['trainNumber'] ?? raw['number'] ?? raw['train_number'] ?? '').toString().trim();
-      final name = (raw['trainName'] ?? raw['name'] ?? raw['train_name'] ?? '').toString().trim();
-      if (no.isNotEmpty && (no.toLowerCase().contains(q.toLowerCase()) || name.toLowerCase().contains(q.toLowerCase()))) {
-        if (seen.add(no)) {
-          merged.add({
-            'number': no,
-            'name': (name.isNotEmpty && !name.startsWith('Train ')) ? name : 'Train $no',
-            'source': (raw['source'] ?? '').toString(),
-            'destination': (raw['destination'] ?? '').toString(),
-          });
+    final cached = await OfflineCache.get('train_search_${q.toLowerCase()}');
+    if (cached is List) {
+      for (final item in cached) {
+        if (item is Map) {
+          final no = (item['train_number'] ?? item['number'] ?? '').toString().trim();
+          final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
+          if (no.isNotEmpty && seen.add(no)) {
+            merged.add({
+              'number': no,
+              'name': name.isNotEmpty ? name : 'Train $no',
+              'source': _extractStation(Map<String, dynamic>.from(item), ['from', 'source', 'from_station']),
+              'destination': _extractStation(Map<String, dynamic>.from(item), ['to', 'destination', 'to_station']),
+            });
+          }
         }
       }
     }
 
-    if (!mounted || seq != _reqSeq) return;
-    if (merged.isNotEmpty) {
-      if (_searchMemoryCache.length > 100) _searchMemoryCache.clear();
-      _searchMemoryCache[cacheKey] = merged;
+    final remote = await RailRadarSource.searchTrains(q);
+    for (final item in remote) {
+      final no = (item['train_number'] ?? item['number'] ?? '').toString().trim();
+      final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
+      if (no.isNotEmpty) {
+        if (seen.add(no)) {
+          merged.add({
+            'number': no,
+            'name': name.isNotEmpty ? name : 'Train $no',
+            'source': _extractStation(item, ['from', 'source', 'from_station']),
+            'destination': _extractStation(item, ['to', 'destination', 'to_station']),
+          });
+        } else {
+          final existingIndex = merged.indexWhere((m) => m['number'] == no);
+          if (existingIndex >= 0) {
+            final existingName = merged[existingIndex]['name']?.toString() ?? '';
+            if ((existingName.isEmpty || existingName.startsWith('Train ')) &&
+                name.isNotEmpty &&
+                !name.startsWith('Train ')) {
+              merged[existingIndex]['name'] = name;
+            }
+          }
+        }
+      }
     }
-    setState(() {
-      _items = merged;
-      _loading = false;
-    });
+
+    if (mounted && seq == _reqSeq) {
+      if (merged.isNotEmpty) {
+        if (_searchMemoryCache.length > 100) _searchMemoryCache.clear();
+        _searchMemoryCache[cacheKey] = merged;
+        unawaited(OfflineCache.put('train_search_${q.toLowerCase()}', merged, ttl: const Duration(days: 7)));
+      }
+      setState(() {
+        _items = merged;
+        _loading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = ThemeController.instance.isDarkMode;
     final textPrimary = isDark ? Colors.white : const Color(0xFF1C1C1E);
-    final textSecondary = isDark ? Colors.white54 : const Color(0xFF8E8E93);
-    final cardBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-    final popupBg = isDark ? const Color(0xFF16161C) : const Color(0xFFFFFFFF);
-    final borderCol = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE5E5EA);
+    final textSecondary = isDark ? const Color(0xFF98989D) : const Color(0xFF8E8E93);
+    final popupBg = isDark ? const Color(0xFF1A1D2C) : Colors.white;
+    final borderCol = isDark ? Colors.white.withValues(alpha: 0.12) : const Color(0xFFE5E5EA);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Input Field
-        Container(
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: borderCol,
-              width: 1.2,
-            ),
-          ),
-          child: TextField(
-            controller: widget.controller,
-            keyboardType: TextInputType.text,
-            style: GoogleFonts.inter(
-              color: textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-            decoration: InputDecoration(
-              hintText: widget.hint,
-              hintStyle: GoogleFonts.inter(
-                color: textSecondary.withValues(alpha: 0.5),
-                fontSize: 13,
-                fontWeight: FontWeight.w400,
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A84FF).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              prefixIcon: Icon(widget.icon, color: const Color(0xFF0A84FF), size: 20),
-              suffixIcon: _loading
-                  ? const Padding(
-                      padding: EdgeInsets.all(14),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Color(0xFF0A84FF),
-                        ),
-                      ),
-                    )
-                  : (widget.controller.text.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(Icons.clear, color: textSecondary, size: 18),
-                          onPressed: () {
-                            widget.controller.clear();
-                            setState(() => _items = []);
-                          },
-                        )
-                      : null),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Icon(
+                widget.icon,
+                color: const Color(0xFF0A84FF),
+                size: 20,
+              ),
             ),
-          ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: TextField(
+                controller: widget.controller,
+                style: GoogleFonts.inter(
+                  color: textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+                decoration: InputDecoration(
+                  hintText: widget.hint,
+                  hintStyle: GoogleFonts.inter(
+                    color: textSecondary.withValues(alpha: 0.5),
+                    fontSize: 14,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  suffixIcon: _loading
+                      ? const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF0A84FF),
+                            ),
+                          ),
+                        )
+                      : (widget.controller.text.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(
+                                  Icons.clear_rounded,
+                                  color: textSecondary,
+                                  size: 18,
+                                ),
+                                onPressed: () {
+                                  widget.controller.clear();
+                                  setState(() => _items = []);
+                                },
+                              )
+                            : null),
+                ),
+              ),
+            ),
+          ],
         ),
-
-        // Dropdown Suggestions Card with Real-Time Name Resolution
         if (_items.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: Container(
-                constraints: const BoxConstraints(maxHeight: 250),
+                constraints: const BoxConstraints(maxHeight: 260),
                 decoration: BoxDecoration(
                   color: popupBg,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: borderCol,
-                    width: 1,
-                  ),
+                  border: Border.all(color: borderCol, width: 1),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
@@ -288,9 +279,8 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
                     color: borderCol,
                   ),
                   itemBuilder: (_, i) {
-                    final item = _items[i];
                     return _TrainAutocompleteTile(
-                      item: item,
+                      item: _items[i],
                       isDark: isDark,
                       textPrimary: textPrimary,
                       textSecondary: textSecondary,
@@ -317,9 +307,6 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// AUTOCOMPLETE TILE WITH ON-THE-FLY OFFICIAL TRAIN NAME RESOLUTION
-// ═══════════════════════════════════════════════════════════════════════
 class _TrainAutocompleteTile extends StatefulWidget {
   final Map<String, dynamic> item;
   final Function(String trainNo, String name, String src, String dst) onTap;

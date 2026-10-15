@@ -119,25 +119,26 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final kinds = _historyKinds
         .where((kind) => _category(kind) == _filter)
         .toList();
-    if (_filter == _HistoryFilter.routes) kinds.add('search');
     for (final kind in kinds) {
-      await OfflineCache.clearHistory('', kind: kind);
+      await OfflineCache.clearHistory(kind);
     }
+    await OfflineCache.clearHistory('search');
     await _load();
   }
 
   Future<void> _openItem(Map<String, dynamic> item) async {
+    final kind = _kind(item);
     final data = _dataFor(item);
     final query = item['query']?.toString() ?? '';
     final label = item['label']?.toString() ?? query;
-    final kind = _kind(item);
-    Widget? screen;
 
+    Widget? screen;
     switch (kind) {
       case 'route_search':
-        final fromCode = data['fromCode']?.toString() ?? '';
-        final toCode = data['toCode']?.toString() ?? '';
-        if (fromCode.isNotEmpty && toCode.isNotEmpty) {
+      case 'search':
+        final fromCode = data['fromCode']?.toString();
+        final toCode = data['toCode']?.toString();
+        if (fromCode != null && toCode != null) {
           screen = TrainSearchScreen(
             fromCode: fromCode,
             toCode: toCode,
@@ -156,22 +157,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
           );
         }
         break;
-      case 'search':
-        final codes = RegExp(
-          r'^([A-Za-z0-9]{2,6})\s*(?:→|->)\s*([A-Za-z0-9]{2,6})$',
-        ).firstMatch(query);
-        if (codes != null) {
-          screen = TrainSearchScreen(
-            fromCode: codes.group(1)!,
-            toCode: codes.group(2)!,
-            fromName: codes.group(1)!,
-            toName: codes.group(2)!,
-          );
-        }
-        break;
       case 'train':
+        final trainNumber = data['trainNumber']?.toString() ?? query;
         screen = TrainDetailsScreen(
-          trainNumber: data['trainNumber']?.toString() ?? query,
+          trainNumber: trainNumber,
           trainName: data['trainName']?.toString() ?? label,
         );
         break;
@@ -188,14 +177,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
           initialTrainNumber: data['trainNumber']?.toString(),
           initialFromCode: data['fromCode']?.toString(),
           initialToCode: data['toCode']?.toString(),
-          initialClassCode: data['classCode']?.toString(),
-          initialQuotaCode: data['quotaCode']?.toString(),
+          initialClassCode: data['class']?.toString(),
+          initialQuotaCode: data['quota']?.toString(),
         );
         break;
       case 'radar':
-        screen = ScheduleScreen(
-          initialStationCode: data['stationCode']?.toString() ?? query,
-        );
+        screen = const ScheduleScreen();
         break;
       case 'traffic':
         screen = LiveTrafficScreen(
@@ -250,8 +237,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         actions: [
           if (visible.isNotEmpty)
             IconButton(
-              tooltip:
-                  'Clear ${_filter == _HistoryFilter.all ? 'all' : 'filtered'} history',
+              tooltip: 'Clear history',
               icon: Icon(CupertinoIcons.trash, color: textSecondary, size: 18),
               onPressed: _clearHistory,
             ),
@@ -280,8 +266,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 children: [
                   const FeatureIntro(
                     title: 'Pick up where\nyou left off.',
-                    subtitle:
-                        'Open recent searches again, grouped by what you need.',
+                    subtitle: 'Open recent searches again, grouped by what you need.',
                     icon: CupertinoIcons.time_solid,
                     accent: Color(0xFF0A84FF),
                   ),
@@ -452,35 +437,51 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Color _accentFor(String kind) {
-    switch (kind) {
-      case 'route_search':
-      case 'search':
-        return const Color(0xFF0A84FF);
-      case 'pnr':
-        return const Color(0xFFFF9F0A);
-      case 'coach':
-        return const Color(0xFF5E5CE6);
-      case 'fare':
-        return const Color(0xFF64D2FF);
-      default:
-        return const Color(0xFF30D158);
-    }
-  }
-
   IconData _iconFor(String kind) {
     switch (kind) {
       case 'route_search':
       case 'search':
-        return CupertinoIcons.alt;
+        return CupertinoIcons.arrow_up_down_square_fill;
+      case 'train':
+        return CupertinoIcons.tram_fill;
       case 'pnr':
         return CupertinoIcons.ticket_fill;
       case 'coach':
         return CupertinoIcons.square_stack_3d_up_fill;
       case 'fare':
         return CupertinoIcons.money_dollar_circle_fill;
+      case 'radar':
+        return CupertinoIcons.antenna_radiowaves_left_right;
+      case 'traffic':
+        return CupertinoIcons.building_2_fill;
+      case 'alerts':
+        return CupertinoIcons.bell_fill;
       default:
-        return CupertinoIcons.tram_fill;
+        return CupertinoIcons.location_fill;
+    }
+  }
+
+  Color _accentFor(String kind) {
+    switch (kind) {
+      case 'route_search':
+      case 'search':
+        return const Color(0xFF0A84FF);
+      case 'train':
+        return const Color(0xFF30D158);
+      case 'pnr':
+        return const Color(0xFFFF9F0A);
+      case 'coach':
+        return const Color(0xFF64D2FF);
+      case 'fare':
+        return const Color(0xFFBF5AF2);
+      case 'radar':
+        return const Color(0xFFFF375F);
+      case 'traffic':
+        return const Color(0xFF5E5CE6);
+      case 'alerts':
+        return const Color(0xFFFF453A);
+      default:
+        return const Color(0xFF0A84FF);
     }
   }
 }

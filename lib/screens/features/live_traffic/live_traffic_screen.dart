@@ -98,55 +98,31 @@ class _LiveTrafficScreenState extends State<LiveTrafficScreen>
           _error = null;
         });
       },
-      onError: (e) {
+      onError: (err) {
         if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = 'Live stream error.';
+          _error = 'Failed to load live station traffic.';
         });
       },
     );
   }
 
-  Future<void> _manualRefresh() async {
-    final code =
-        _station?.code ?? _ctrl.text.trim().toUpperCase().split(' ').first;
-    if (code.isEmpty) return;
-    if (_refreshing) return;
-    _refreshing = true;
-    if (mounted) setState(() {});
-
-    try {
-      final d = await LiveTrafficService.fetch(code, hours: _selectedHours);
-      if (!mounted) return;
-      if (d != null && _station == null) {
-        final station = Station(code: code, name: code);
-        unawaited(_rememberStation(station, 'traffic'));
-      }
-      setState(() {
-        _data = d ?? _data;
-        _lastFetch = DateTime.now();
-        if (d == null) _error = 'No live traffic found for $code.';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _error = 'Failed to refresh.');
-    } finally {
-      _refreshing = false;
-      if (mounted) setState(() {});
-    }
-  }
-
   void _onStationSelected(Station s) {
-    setState(() {
-      _station = s;
-      _ctrl.text = '${s.name} (${s.code})';
-      _data = null;
-      _filter = _Filter.all;
-      _error = null;
-    });
+    _station = s;
+    _ctrl.text = '${s.name} (${s.code})';
+    _data = null;
     unawaited(_rememberStation(s, 'traffic'));
     _subscribe(s.code);
+  }
+
+  Future<void> _manualRefresh() async {
+    if (_station == null && _data == null) return;
+    setState(() => _refreshing = true);
+    final code = _station?.code ?? _data!.stationCode;
+    _subscribe(code);
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (mounted) setState(() => _refreshing = false);
   }
 
   void _selectHours(int hours) {
@@ -154,47 +130,39 @@ class _LiveTrafficScreenState extends State<LiveTrafficScreen>
     setState(() {
       _selectedHours = hours;
       _data = null;
-      _error = null;
     });
-    final code =
-        _station?.code ?? _ctrl.text.trim().toUpperCase().split(' ').first;
+    final code = _station?.code ?? _ctrl.text.trim().toUpperCase();
     if (code.isNotEmpty) _subscribe(code);
   }
 
   List<TrainMovement> get _visibleMovements {
-    final all = _data?.movements ?? [];
-    List<TrainMovement> filtered;
+    if (_data == null) return [];
+    var list = _data!.movements;
 
     switch (_filter) {
       case _Filter.onTime:
-        filtered = all.where((m) => m.delayMinutes <= 0).toList();
+        list = list.where((m) => !m.isDelayed).toList();
         break;
       case _Filter.delayed:
-        filtered = all.where((m) => m.delayMinutes > 0).toList();
+        list = _data!.delayed;
         break;
       case _Filter.atStation:
-        filtered = all.where((m) => m.isAtStation).toList();
+        list = list.where((m) => m.isAtStation).toList();
         break;
       case _Filter.all:
-        filtered = all;
         break;
     }
 
-    if (_searchQuery.trim().isEmpty) return filtered;
+    if (_searchQuery.trim().isNotEmpty) {
+      final q = _searchQuery.trim().toLowerCase();
+      list = list.where((m) {
+        return m.trainNumber.toLowerCase().contains(q) ||
+            m.trainName.toLowerCase().contains(q) ||
+            (m.platform != null && m.platform!.toLowerCase().contains(q));
+      }).toList();
+    }
 
-    final query = _searchQuery.trim().toLowerCase();
-    return filtered.where((m) {
-      final num = m.trainNumber.toLowerCase();
-      final name = m.trainName.toLowerCase();
-      final src = m.source.toLowerCase();
-      final dst = m.destination.toLowerCase();
-      final pf = (m.platform ?? '').toLowerCase();
-      return num.contains(query) ||
-          name.contains(query) ||
-          src.contains(query) ||
-          dst.contains(query) ||
-          pf.contains(query);
-    }).toList();
+    return list;
   }
 
   @override
@@ -751,10 +719,10 @@ class _LiveTrafficScreenState extends State<LiveTrafficScreen>
           Text(
             hasStation
                 ? (_filter == _Filter.delayed
-                    ? 'No delayed trains in the selected $_selectedHours-hour window.'
+                    ? 'No delayed trains in the selected window.'
                     : _filter == _Filter.onTime
-                        ? 'No on-time trains in the selected $_selectedHours-hour window.'
-                        : 'No train movements in the selected $_selectedHours-hour window.')
+                        ? 'No on-time trains in the selected window.'
+                        : 'No train movements in the selected window.')
                 : 'Search or select a station to view its live traffic board',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
@@ -779,7 +747,6 @@ class _LiveTrafficScreenState extends State<LiveTrafficScreen>
     final isAtStation = m.isAtStation;
     final type = m.trainType ?? 'Express';
 
-    // Status pill colors
     Color statusColor;
     String statusLabel;
 

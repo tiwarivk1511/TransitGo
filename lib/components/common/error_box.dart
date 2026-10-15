@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/theme_controller.dart';
+import '../../services/translation_service.dart';
 
 class ErrorBox extends StatelessWidget {
   final String message;
@@ -44,7 +45,7 @@ class ErrorBox extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  message,
+                  message.tr,
                   style: GoogleFonts.inter(
                     color: textCol,
                     fontWeight: FontWeight.w700,
@@ -62,7 +63,7 @@ class ErrorBox extends StatelessWidget {
                 onPressed: onRetry,
                 icon: Icon(Icons.refresh, size: 16, color: retryCol),
                 label: Text(
-                  retryLabel,
+                  retryLabel.tr,
                   style: GoogleFonts.inter(
                     color: retryCol,
                     fontWeight: FontWeight.w900,

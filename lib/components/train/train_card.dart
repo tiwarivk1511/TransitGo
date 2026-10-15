@@ -2,6 +2,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../services/translation_service.dart';
+
 class TrainCard extends StatelessWidget {
   final String trainNumber;
   final String trainName;
@@ -129,7 +131,7 @@ class TrainCard extends StatelessWidget {
                             ),
                           const Spacer(),
                           Text(
-                            trainType.toUpperCase(),
+                            trainType.tr,
                             style: GoogleFonts.inter(
                               color: textSecondary,
                               fontSize: 10,
@@ -143,7 +145,7 @@ class TrainCard extends StatelessWidget {
 
                       // ── Train name ────────────────────────────────────
                       Text(
-                        trainName.toUpperCase(),
+                        trainName.tr,
                         style: GoogleFonts.inter(
                           color: textPrimary,
                           fontSize: 15,
@@ -217,7 +219,7 @@ class TrainCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '$halts halts between',
+                              '$halts ${'halts between'.tr}',
                               style: GoogleFonts.inter(
                                 color: textSecondary,
                                 fontSize: 10,
@@ -264,7 +266,7 @@ class TrainCard extends StatelessWidget {
         SizedBox(
           width: 100,
           child: Text(
-            station,
+            station.tr,
             style: GoogleFonts.inter(
               color: textSecondary,
               fontSize: 10,

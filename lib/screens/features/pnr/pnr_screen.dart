@@ -65,7 +65,9 @@ class _PnrScreenState extends State<PnrScreen> {
     setState(() {
       _loading = false;
       _data = d;
-      if (d == null) _error = 'PNR status unavailable. Please check the 10-digit number.';
+      if (d == null) {
+        _error = 'PNR status unavailable. Please check the 10-digit number.';
+      }
     });
   }
 
@@ -226,8 +228,8 @@ class _PnrScreenState extends State<PnrScreen> {
             const SizedBox(height: 20),
 
             if (_loading)
-              LoadingIndicator(
-                color: accentCol,
+              const LoadingIndicator(
+                color: Color(0xFFFF9F0A),
                 label: 'Fetching official PRS passenger status…',
               )
             else if (_error != null)

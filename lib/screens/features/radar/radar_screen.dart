@@ -853,7 +853,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                     Row(
                       children: [
                         Text(
-                          'Google Live Radar Map',
+                          'Live Train Radar',
                           style: GoogleFonts.inter(
                             color: textPrimary,
                             fontSize: 15,

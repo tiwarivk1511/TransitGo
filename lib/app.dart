@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'core/localization/language_controller.dart';
 import 'core/theme/theme_controller.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/startup_error_screen.dart';
@@ -15,9 +16,13 @@ class TransitGoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: ThemeController.instance,
+      listenable: Listenable.merge([
+        ThemeController.instance,
+        LanguageController.instance,
+      ]),
       builder: (context, _) {
         return MaterialApp(
+          locale: LanguageController.instance.currentLocale,
           title: 'TransitGo',
           debugShowCheckedModeBanner: false,
           themeMode: ThemeController.instance.themeMode,
@@ -29,7 +34,9 @@ class TransitGoApp extends StatelessWidget {
           // ☀️ APPLE LIGHT THEME
           theme: ThemeData(
             brightness: Brightness.light,
-            scaffoldBackgroundColor: const Color(0xFFF2F2F7), // iOS Grouped Light Grey
+            scaffoldBackgroundColor: const Color(
+              0xFFF2F2F7,
+            ), // iOS Grouped Light Grey
             colorScheme: const ColorScheme.light(
               primary: Color(0xFF007AFF), // Apple System Blue Light
               secondary: Color(0xFF34C759), // Apple Mint Green Light
@@ -37,9 +44,7 @@ class TransitGoApp extends StatelessWidget {
               surfaceContainer: Color(0xFFE5E5EA),
               error: Color(0xFFFF3B30), // Apple Red Light
             ),
-            textTheme: GoogleFonts.interTextTheme(
-              ThemeData.light().textTheme,
-            ),
+            textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme),
             appBarTheme: const AppBarTheme(
               backgroundColor: Color(0xFFF2F2F7),
               elevation: 0,
@@ -77,7 +82,9 @@ class TransitGoApp extends StatelessWidget {
           // 🌙 OBSIDIAN MIDNIGHT OLED DARK THEME
           darkTheme: ThemeData(
             brightness: Brightness.dark,
-            scaffoldBackgroundColor: const Color(0xFF030305), // Pure OLED Deep Pitch Black
+            scaffoldBackgroundColor: const Color(
+              0xFF030305,
+            ), // Pure OLED Deep Pitch Black
             colorScheme: const ColorScheme.dark(
               primary: Color(0xFF0A84FF), // Vivid Electric Blue Pro
               secondary: Color(0xFF30D158), // Neon Mint Emerald Green
@@ -85,9 +92,7 @@ class TransitGoApp extends StatelessWidget {
               surfaceContainer: Color(0xFF181B26), // Elevated Input Surface
               error: Color(0xFFFF375F), // Crimson Rose Red Pro
             ),
-            textTheme: GoogleFonts.interTextTheme(
-              ThemeData.dark().textTheme,
-            ),
+            textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
             appBarTheme: const AppBarTheme(
               backgroundColor: Color(0xFF030305),
               elevation: 0,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/theme_controller.dart';
+import '../../services/translation_service.dart';
 
 class StaticTrainRakeView extends StatelessWidget {
   final String trainName;
@@ -100,7 +101,7 @@ class StaticTrainRakeView extends StatelessWidget {
             child: effectiveCoaches.isEmpty
                 ? Center(
                     child: Text(
-                      'Coach formation unavailable',
+                      'Coach formation unavailable'.tr,
                       style: GoogleFonts.inter(
                         color: isDark ? Colors.white38 : const Color(0xFF636366),
                         fontSize: 11,
@@ -153,10 +154,6 @@ class _SyntheticCoach {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// HIGH-SPEED AERODYNAMIC BULLET TRAIN PASSENGER COACH
-// ═══════════════════════════════════════════════════════════════════════
-
 class _StaticPassengerCoach extends StatelessWidget {
   final dynamic coach;
   final _LiveryPalette livery;
@@ -203,7 +200,6 @@ class _StaticPassengerCoach extends StatelessWidget {
               borderRadius: BorderRadius.circular(7),
               child: Stack(
                 children: [
-                  // Panoramic Glass Window Band
                   Positioned(
                     left: 5,
                     right: 5,
@@ -235,7 +231,6 @@ class _StaticPassengerCoach extends StatelessWidget {
                     ),
                   ),
 
-                  // High-Speed Speed Stripe
                   Positioned(
                     top: 32,
                     left: 0,
@@ -244,83 +239,81 @@ class _StaticPassengerCoach extends StatelessWidget {
                     child: Container(color: livery.accent),
                   ),
 
-                  // Automatic Plug Door Highlight
                   Positioned(
                     right: 5,
                     top: 11,
-                    bottom: 5,
-                    width: 9,
+                    height: 46,
+                    width: 10,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF9F0A).withValues(alpha: 0.22),
+                        color: Colors.black.withValues(alpha: 0.15),
                         border: Border.all(
-                          color: const Color(0xFFFF9F0A).withValues(alpha: 0.5),
+                          color: Colors.white.withValues(alpha: 0.2),
                           width: 0.8,
                         ),
-                        borderRadius: BorderRadius.circular(3),
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
 
-                  // Coach Code & Class Badge
                   Positioned(
                     left: 6,
-                    bottom: 4,
+                    bottom: 6,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          code.isEmpty ? category : code,
+                          code.toUpperCase(),
                           style: GoogleFonts.inter(
-                            color: livery.text,
-                            fontSize: 9.5,
+                            color: livery.textColor,
+                            fontSize: 11,
                             fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
                           ),
                         ),
                         Text(
-                          category,
+                          category.toUpperCase().tr,
                           style: GoogleFonts.inter(
-                            color: livery.text.withValues(alpha: 0.7),
-                            fontSize: 6.5,
-                            fontWeight: FontWeight.w800,
+                            color: livery.subtextColor,
+                            fontSize: 7.5,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
                     ),
                   ),
+
+                  if (position > 0)
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '#$position',
+                          style: GoogleFonts.inter(
+                            color: livery.textColor,
+                            fontSize: 7.5,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
-
-          // Underframe Mechanical Wheels
-          SizedBox(
-            height: 14,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _StaticBogie(isDark: isDark),
-                Text(
-                  '#$position',
-                  style: GoogleFonts.inter(
-                    color: isDark ? Colors.white38 : const Color(0xFF636366),
-                    fontSize: 7.5,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                _StaticBogie(isDark: isDark),
-              ],
-            ),
-          ),
+          const SizedBox(height: 3),
+          _StaticBogieWheels(isDark: isDark),
         ],
       ),
     );
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// HIGH-SPEED AERODYNAMIC BULLET NOSE ENGINE COACH
-// ═══════════════════════════════════════════════════════════════════════
 
 class _StaticDrivingCoach extends StatelessWidget {
   final dynamic coach;
@@ -335,347 +328,180 @@ class _StaticDrivingCoach extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final code = (coach.code ?? '').toString();
-    final position = coach.position ?? 0;
+    final code = (coach.code ?? 'DTC').toString();
 
     return SizedBox(
-      width: 104,
+      width: 100,
       height: 100,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          SizedBox(
-            width: 102,
-            height: 70,
-            child: Stack(
-              children: [
-                // Custom Aerodynamic Bullet Nose Shape
-                CustomPaint(
-                  size: const Size(102, 66),
-                  painter: _BulletNosePainter(
-                    bodyTop: livery.bodyTop,
-                    bodyBottom: livery.bodyBottom,
-                    outline: livery.outline,
-                    accent: livery.accent,
-                  ),
-                ),
-
-                // Panoramic Cockpit Windshield (Dark Tinted Glass)
-                Positioned(
-                  left: 3,
-                  top: 12,
-                  width: 40,
-                  height: 17,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(18),
-                        topRight: Radius.circular(3),
-                        bottomLeft: Radius.circular(0),
-                      ),
-                      border: Border.all(
-                        color: const Color(0xFF00F2FE).withValues(alpha: 0.5),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          top: 2,
-                          left: 4,
-                          width: 14,
-                          height: 5,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.35),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Aerodynamic Side Window Band
-                Positioned(
-                  left: 52,
-                  right: 6,
-                  top: 12,
-                  height: 17,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
-                      borderRadius: BorderRadius.circular(3),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: List.generate(
-                        2,
-                        (i) => Container(
-                          width: 1,
-                          color: Colors.white.withValues(alpha: 0.2),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Bright LED Headlight
-                Positioned(
-                  left: 2,
-                  bottom: 12,
-                  child: Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF00F2FE),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF00F2FE).withValues(alpha: 0.95),
-                          blurRadius: 9,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // DTC / Engine Code
-                Positioned(
-                  right: 8,
-                  bottom: 4,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        code.isEmpty ? 'DTC' : code,
-                        style: GoogleFonts.inter(
-                          color: livery.text,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        'CAB',
-                        style: GoogleFonts.inter(
-                          color: livery.text.withValues(alpha: 0.7),
-                          fontSize: 6,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
+          Container(
+            width: 98,
+            height: 66,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [livery.bodyTop, livery.bodyBottom],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(28),
+                bottomLeft: Radius.circular(10),
+                topRight: Radius.circular(8),
+                bottomRight: Radius.circular(8),
+              ),
+              border: Border.all(color: livery.outline, width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
+                  blurRadius: 4,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
-          ),
-
-          // Underframe Mechanical Wheels
-          SizedBox(
-            height: 14,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _StaticBogie(isDark: isDark),
-                Text(
-                  '#$position',
-                  style: GoogleFonts.inter(
-                    color: isDark ? Colors.white38 : const Color(0xFF636366),
-                    fontSize: 7.5,
-                    fontWeight: FontWeight.bold,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(26),
+                bottomLeft: Radius.circular(8),
+                topRight: Radius.circular(6),
+                bottomRight: Radius.circular(6),
+              ),
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 2,
+                    top: 10,
+                    width: 24,
+                    height: 18,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(16),
+                          bottomLeft: Radius.circular(4),
+                          topRight: Radius.circular(4),
+                          bottomRight: Radius.circular(4),
+                        ),
+                        border: Border.all(
+                          color: const Color(0xFF00F2FE).withValues(alpha: 0.6),
+                          width: 1.2,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                _StaticBogie(isDark: isDark),
-              ],
+
+                  Positioned(
+                    left: 32,
+                    right: 6,
+                    top: 11,
+                    height: 18,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: const Color(0xFF00F2FE).withValues(alpha: 0.35),
+                          width: 0.8,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  Positioned(
+                    top: 32,
+                    left: 0,
+                    right: 0,
+                    height: 4.5,
+                    child: Container(color: livery.accent),
+                  ),
+
+                  Positioned(
+                    left: 32,
+                    bottom: 6,
+                    child: Text(
+                      code.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        color: livery.textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          const SizedBox(height: 3),
+          _StaticBogieWheels(isDark: isDark),
         ],
       ),
     );
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// CUSTOM PAINTER FOR HIGH-SPEED BULLET NOSE
-// ═══════════════════════════════════════════════════════════════════════
-
-class _BulletNosePainter extends CustomPainter {
-  final Color bodyTop;
-  final Color bodyBottom;
-  final Color outline;
-  final Color accent;
-  final double strokeWidth;
-
-  _BulletNosePainter({
-    required this.bodyTop,
-    required this.bodyBottom,
-    required this.outline,
-    required this.accent,
-    this.strokeWidth = 1.2,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path();
-    final w = size.width;
-    final h = size.height;
-
-    // Aerodynamic Tapered Nose Curve (Shinkansen N700S / Vande Bharat Profile)
-    path.moveTo(w, 0);
-    path.lineTo(w, h * 0.90);
-    path.lineTo(w * 0.28, h * 0.90);
-    path.cubicTo(
-      w * 0.12, h * 0.90,
-      0, h * 0.70,
-      0, h * 0.50, // Nose Tip
-    );
-    path.cubicTo(
-      0, h * 0.25,
-      w * 0.18, 0,
-      w * 0.48, 0,
-    );
-    path.close();
-
-    final fillPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [bodyTop, bodyBottom],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ).createShader(Rect.fromLTWH(0, 0, w, h));
-    canvas.drawPath(path, fillPaint);
-
-    // Speed Accent Stripe
-    final stripePath = Path();
-    stripePath.moveTo(0, h * 0.52);
-    stripePath.quadraticBezierTo(w * 0.25, h * 0.52, w, h * 0.52);
-    stripePath.lineTo(w, h * 0.62);
-    stripePath.quadraticBezierTo(w * 0.20, h * 0.62, 0, h * 0.52);
-    stripePath.close();
-
-    final stripePaint = Paint()
-      ..color = accent
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(stripePath, stripePaint);
-
-    // Border Outline
-    final strokePaint = Paint()
-      ..color = outline
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth;
-    canvas.drawPath(path, strokePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _BulletNosePainter oldDelegate) => true;
-}
-
 class _StaticGangway extends StatelessWidget {
   final bool isDark;
-
-  const _StaticGangway({this.isDark = true});
+  const _StaticGangway({required this.isDark});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: 6,
-      height: 52,
+      height: 38,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFD1D1D6),
+        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFF8E8E93),
         borderRadius: BorderRadius.circular(2),
-        border: Border.all(color: isDark ? Colors.black54 : Colors.grey.shade400),
+        border: Border.all(
+          color: isDark ? Colors.black45 : Colors.white70,
+          width: 0.8,
+        ),
       ),
     );
   }
 }
 
-class _StaticBogie extends StatelessWidget {
+class _StaticBogieWheels extends StatelessWidget {
   final bool isDark;
-
-  const _StaticBogie({this.isDark = true});
+  const _StaticBogieWheels({required this.isDark});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 22,
-      height: 11,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFF64748B),
-        borderRadius: BorderRadius.circular(3),
-        border: Border.all(color: isDark ? Colors.black87 : Colors.grey.shade600),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFFE2E8F0),
-              border: Border.all(color: Colors.black45),
-            ),
-          ),
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFFE2E8F0),
-              border: Border.all(color: Colors.black45),
-            ),
-          ),
-        ],
-      ),
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _wheelPair(isDark),
+        const SizedBox(width: 24),
+        _wheelPair(isDark),
+      ],
     );
   }
-}
 
-class _StaticBallastTrack extends StatelessWidget {
-  final bool isDark;
-
-  const _StaticBallastTrack({this.isDark = true});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
+  Widget _wheelPair(bool isDark) {
+    final wheelColor = isDark ? const Color(0xFF8E8E93) : const Color(0xFF636366);
+    return Row(
       children: [
         Container(
-          height: 3,
+          width: 9,
+          height: 9,
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-            borderRadius: BorderRadius.circular(2),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? const Color(0xFF00F2FE) : const Color(0xFF0A84FF),
-                blurRadius: isDark ? 4 : 2,
-              )
-            ],
+            color: wheelColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.black, width: 1.5),
           ),
         ),
-        const SizedBox(height: 1.5),
         Container(
-          height: 4,
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: List.generate(
-              28,
-              (i) => Container(
-                width: 2,
-                color: isDark ? Colors.black38 : Colors.white60,
-              ),
-            ),
+          width: 8,
+          height: 2.5,
+          color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFFC7C7CC),
+        ),
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(
+            color: wheelColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.black, width: 1.5),
           ),
         ),
       ],
@@ -683,67 +509,90 @@ class _StaticBallastTrack extends StatelessWidget {
   }
 }
 
+class _StaticBallastTrack extends StatelessWidget {
+  final bool isDark;
+  const _StaticBallastTrack({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 3,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFF8E8E93),
+        borderRadius: BorderRadius.circular(1.5),
+      ),
+    );
+  }
+}
+
 class _LiveryPalette {
-  final String label;
   final Color bodyTop;
   final Color bodyBottom;
   final Color accent;
   final Color outline;
-  final Color text;
+  final Color textColor;
+  final Color subtextColor;
 
   const _LiveryPalette({
-    required this.label,
     required this.bodyTop,
     required this.bodyBottom,
     required this.accent,
     required this.outline,
-    required this.text,
+    required this.textColor,
+    required this.subtextColor,
   });
 
   static _LiveryPalette resolve({
     required String trainName,
-    required String? trainType,
-    required String? apiLivery,
-    required bool isDark,
+    String? trainType,
+    String? apiLivery,
+    bool isDark = true,
   }) {
-    final tName = trainName.toUpperCase();
-    final tType = (trainType ?? '').toUpperCase();
-    final aLiv = (apiLivery ?? '').toUpperCase();
+    final name = trainName.toLowerCase();
+    final type = (trainType ?? '').toLowerCase();
+    final api = (apiLivery ?? '').toLowerCase();
 
-    if (tName.contains('VANDE') ||
-        tName.contains('NAMO') ||
-        tName.contains('RRTS') ||
-        tType.contains('VB') ||
-        aLiv.contains('VANDE') ||
-        aLiv.contains('RRTS')) {
+    if (name.contains('vande bharat') || type.contains('vande') || api.contains('vande')) {
       return _LiveryPalette(
-        label: 'Vande Bharat',
-        bodyTop: const Color(0xFFFFFFFF),
-        bodyBottom: isDark ? const Color(0xFFE2E8F0) : const Color(0xFFD0D8E8),
-        accent: const Color(0xFF0A84FF),
-        outline: const Color(0xFF0A84FF),
-        text: const Color(0xFF0F172A),
+        bodyTop: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        bodyBottom: isDark ? const Color(0xFF0038A8) : const Color(0xFF0055FF),
+        accent: const Color(0xFF00F2FE),
+        outline: const Color(0xFF0088FF),
+        textColor: Colors.white,
+        subtextColor: const Color(0xFF64D2FF),
       );
     }
 
-    if (tName.contains('TEJAS') || aLiv.contains('TEJAS')) {
-      return const _LiveryPalette(
-        label: 'Tejas',
-        bodyTop: Color(0xFFFFF176),
-        bodyBottom: Color(0xFFFBC02D),
-        accent: Color(0xFF00F2FE),
-        outline: Color(0xFFF57F17),
-        text: Color(0xFF0F172A),
+    if (name.contains('rajdhani') || api.contains('rajdhani')) {
+      return _LiveryPalette(
+        bodyTop: isDark ? const Color(0xFF7F1D1D) : const Color(0xFFDC2626),
+        bodyBottom: isDark ? const Color(0xFF991B1B) : const Color(0xFFB91C1C),
+        accent: const Color(0xFFFFD60A),
+        outline: const Color(0xFFEF4444),
+        textColor: Colors.white,
+        subtextColor: const Color(0xFFFFD60A),
+      );
+    }
+
+    if (name.contains('shatabdi') || api.contains('shatabdi')) {
+      return _LiveryPalette(
+        bodyTop: isDark ? const Color(0xFF1E3A8A) : const Color(0xFF2563EB),
+        bodyBottom: isDark ? const Color(0xFF1D4ED8) : const Color(0xFF3B82F6),
+        accent: const Color(0xFF60A5FA),
+        outline: const Color(0xFF3B82F6),
+        textColor: Colors.white,
+        subtextColor: const Color(0xFF93C5FD),
       );
     }
 
     return _LiveryPalette(
-      label: 'Express',
-      bodyTop: const Color(0xFFFFFFFF),
-      bodyBottom: isDark ? const Color(0xFFCBD5E1) : const Color(0xFFB8C5D6),
-      accent: isDark ? const Color(0xFF00F2FE) : const Color(0xFF0A84FF),
-      outline: isDark ? const Color(0xFF00F2FE) : const Color(0xFF0A84FF),
-      text: const Color(0xFF0F172A),
+      bodyTop: isDark ? const Color(0xFF1E1B4B) : const Color(0xFF312E81),
+      bodyBottom: isDark ? const Color(0xFF312E81) : const Color(0xFF4338CA),
+      accent: const Color(0xFF818CF8),
+      outline: const Color(0xFF6366F1),
+      textColor: Colors.white,
+      subtextColor: const Color(0xFFA5B4FC),
     );
   }
 }

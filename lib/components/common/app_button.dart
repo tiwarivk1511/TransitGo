@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../services/translation_service.dart';
+
 class AppButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
@@ -32,7 +34,7 @@ class AppButton extends StatelessWidget {
           onPressed: disabled ? null : onTap,
           style: OutlinedButton.styleFrom(
             foregroundColor: c,
-            side: BorderSide(color: c.withOpacity(0.5)),
+            side: BorderSide(color: c.withValues(alpha: 0.5)),
             shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -44,7 +46,7 @@ class AppButton extends StatelessWidget {
                 strokeWidth: 2, color: c),
           )
               : (icon != null ? Icon(icon, size: 18) : const SizedBox.shrink()),
-          label: Text(label,
+          label: Text(label.tr,
               style: GoogleFonts.inter(
                   fontWeight: FontWeight.w900, fontSize: 14)),
         ),
@@ -59,7 +61,7 @@ class AppButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: c,
           foregroundColor: const Color(0xFF0B132B),
-          disabledBackgroundColor: Colors.white.withOpacity(0.05),
+          disabledBackgroundColor: Colors.white.withValues(alpha: 0.05),
           shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 0,
@@ -72,7 +74,7 @@ class AppButton extends StatelessWidget {
               strokeWidth: 2, color: Color(0xFF0B132B)),
         )
             : (icon != null ? Icon(icon, size: 18) : const SizedBox.shrink()),
-        label: Text(label,
+        label: Text(label.tr,
             style: GoogleFonts.inter(
                 fontWeight: FontWeight.w900, fontSize: 14)),
       ),

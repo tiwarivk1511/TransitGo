@@ -540,7 +540,7 @@ class _TrainSearchScreenState extends State<TrainSearchScreen> {
         ],
       ),
       body: ModernBackground(
-        child:_buildBody(bgColor, cardBg, textPrimary, textSecondary),
+        child: _buildBody(bgColor, cardBg, textPrimary, textSecondary),
       ),
     );
   }
@@ -603,7 +603,7 @@ class _TrainSearchScreenState extends State<TrainSearchScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'No direct trains found\nbetween ${widget.fromCode} and ${widget.toCode}.',
+                      'No direct trains found between ${widget.fromCode} and ${widget.toCode}.',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         color: textPrimary,

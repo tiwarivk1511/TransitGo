@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/theme_controller.dart';
 import '../../data/models/coach.dart';
+import '../../services/translation_service.dart';
 
 class CoachSeatMapView extends StatefulWidget {
   final CoachInfo coach;
@@ -99,103 +100,65 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
     if (rawLayout is List) {
       final cabins = rawLayout
           .whereType<Map>()
-          .map((cabin) => Map<String, dynamic>.from(cabin))
+          .map((item) => Map<String, dynamic>.from(item))
           .toList();
       if (cabins.isNotEmpty) return cabins;
-    }
-    if (rawLayout is Map) {
-      return _readCabins(Map<String, dynamic>.from(rawLayout));
-    }
-
-    final seats = blueprint['seats'] ?? blueprint['berths'];
-    if (seats is List && seats.isNotEmpty) {
-      return [
-        {'cabinNumber': 1, 'main': seats},
-      ];
     }
     return [];
   }
 
-  int _readSeatCount(
-    Map<String, dynamic>? blueprint,
-    List<Map<String, dynamic>> cabins,
-  ) {
-    final apiCount = _toInt(
-      blueprint?['totalBerths'] ??
-          blueprint?['totalSeats'] ??
-          blueprint?['seatCount'] ??
-          blueprint?['berthCount'],
-    );
-    if (apiCount != null && apiCount > 0) return apiCount;
-    final layoutCount = cabins.fold<int>(0, (total, cabin) {
-      final main = _asList(cabin['main'] ?? cabin['berths'] ?? cabin['seats']);
-      final side = _asList(cabin['side']);
-      return total + main.length + side.length;
-    });
-    if (layoutCount > 0) return layoutCount;
-    if (widget.coach.totalBerths > 0) return widget.coach.totalBerths;
-    return _typicalSeatCount(widget.coach.category);
-  }
+  void _scrollToSeat(String seatNo) {
+    if (!_scrollController.hasClients) return;
+    final parsedSeat = int.tryParse(seatNo);
+    if (parsedSeat == null || parsedSeat < 1) return;
 
-  bool _apiHasSeatStatus(List<Map<String, dynamic>> cabins) {
-    for (final cabin in cabins) {
-      for (final berth in [
-        ..._asList(cabin['main'] ?? cabin['berths'] ?? cabin['seats']),
-        ..._asList(cabin['side']),
-      ]) {
-        if (berth is Map &&
-            (berth.containsKey('status') ||
-                berth.containsKey('available') ||
-                berth.containsKey('isAvailable') ||
-                berth.containsKey('booked') ||
-                berth.containsKey('isBooked'))) {
-          return true;
-        }
-      }
-    }
-    return false;
+    final approxIndex = ((parsedSeat - 1) / 8).floor();
+    final targetOffset = (approxIndex * 130.0).clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final category = widget.coach.category.toUpperCase();
-    final codeUpper = widget.coach.code.toUpperCase();
-
-    final isLoco = category == 'LOCO' || codeUpper.contains('ENG') || codeUpper.contains('VB');
-    final isEog = category == 'EOG' || codeUpper == 'LPR' || codeUpper == 'SLRD' || codeUpper == 'VP' || codeUpper == 'SLR';
-    final isPantry = category == 'PC' || category.contains('PANTRY') || codeUpper == 'PC';
-    final isDoubleDecker = widget.coach.isDoubleDecker || category == 'ACDC' || category == 'DDC' || category.contains('DOUBLE');
-
-    final blueprint = _findBlueprint();
-    final cabins = _readCabins(blueprint);
-    final seatCount = isDoubleDecker ? 120 : _readSeatCount(blueprint, cabins);
-    final hasSeatStatus = _apiHasSeatStatus(cabins);
-    final hasExactLayout = cabins.isNotEmpty;
-
     final isDark = ThemeController.instance.isDarkMode;
     final cardBg = isDark ? const Color(0xFF16161C) : const Color(0xFFFFFFFF);
     final textPrimary = isDark ? Colors.white : const Color(0xFF1C1C1E);
-    final textSecondary = isDark ? Colors.white54 : const Color(0xFF636366);
+    final textSecondary = isDark ? Colors.white54 : const Color(0xFF8E8E93);
     final borderCol = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE5E5EA);
 
+    final category = widget.coach.category.toUpperCase();
+    final blueprint = _findBlueprint();
+    final cabins = _readCabins(blueprint);
+    final hasExactLayout = cabins.isNotEmpty;
+
+    final seatCount =
+        blueprint?['total_seats'] as int? ??
+        blueprint?['seats_count'] as int? ??
+        (widget.coach.totalBerths > 0 ? widget.coach.totalBerths : null) ??
+        _guessSeatCount(category);
+
+    final isPantry = category == 'PC' || category == 'PANTRY';
+    final isEog = category == 'EOG' || category == 'SLR' || category == 'POWER';
+    final isLoco = category == 'LOCO' || category == 'ENG';
+    final isDoubleDecker = category == 'ACDC' || category == 'DDC';
+    final hasSeatStatus = widget.coach.hasSeats;
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: borderCol),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header Row
           Row(
             children: [
               Container(
@@ -217,14 +180,14 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
               Expanded(
                 child: Text(
                   isLoco
-                      ? 'Locomotive Engine'
+                      ? 'Locomotive Engine'.tr
                       : isEog
-                          ? 'Power Car / Luggage Van'
+                          ? 'Power Car / Luggage Van'.tr
                           : isPantry
-                              ? 'Pantry Car'
+                              ? 'Pantry Car'.tr
                               : isDoubleDecker
-                                  ? 'AC Double Decker Express (3-Deck Chair Car)'
-                                  : '${_getCategoryTitle(category)} ($seatCount Seats)',
+                                  ? 'AC Double Decker Express (3-Deck Chair Car)'.tr
+                                  : '${_getCategoryTitle(category).tr} ($seatCount ${'Seats'.tr})',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
@@ -238,7 +201,6 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
           ),
           const SizedBox(height: 12),
 
-          // Active Selected Seat Info Banner
           if (_selectedSeat != null && _selectedSeat!.isNotEmpty && !isPantry && !isLoco && !isEog)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -254,7 +216,7 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Focused Seat / Berth #$_selectedSeat${_getBerthTypeLabel(category, _selectedSeat!).isNotEmpty ? " • ${_getBerthTypeLabel(category, _selectedSeat!)}" : ""}',
+                      '${'Focused Seat / Berth #'.tr}$_selectedSeat${_getBerthTypeLabel(category, _selectedSeat!).isNotEmpty ? " • ${_getBerthTypeLabel(category, _selectedSeat!).tr}" : ""}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
@@ -276,25 +238,24 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
             Row(
               children: [
                 if (hasSeatStatus) ...[
-                  _legendDot(const Color(0xFF30D158), 'Available', textSecondary),
+                  _legendDot(const Color(0xFF30D158), 'Available'.tr, textSecondary),
                   const SizedBox(width: 10),
-                  _legendDot(const Color(0xFFFF9F0A), 'Booked', textSecondary),
+                  _legendDot(const Color(0xFFFF9F0A), 'Booked'.tr, textSecondary),
                   const SizedBox(width: 10),
                 ] else
-                  _legendDot(textSecondary, 'Architectural Preview', textSecondary),
+                  _legendDot(textSecondary, 'Architectural Preview'.tr, textSecondary),
                 const Spacer(),
-                _legendDot(const Color(0xFF0A84FF), 'Selected Seat', textSecondary),
+                _legendDot(const Color(0xFF0A84FF), 'Selected Seat'.tr, textSecondary),
               ],
             ),
           const SizedBox(height: 14),
 
-          // Seat Map Container
           SizedBox(
             height: 480,
             child: isLoco
-                ? _nonPassengerView('Locomotive Engine Unit 🚂', 'Power Engine at position #${widget.coach.position}', CupertinoIcons.tram_fill, textPrimary, textSecondary)
+                ? _nonPassengerView('Locomotive Engine Unit 🚂'.tr, '${'Power Engine at position #'.tr}${widget.coach.position}', CupertinoIcons.tram_fill, textPrimary, textSecondary)
                 : isEog
-                    ? _nonPassengerView('Power Car / Luggage & Guard Van 🔋', 'EOG Generator & Guard Van at position #${widget.coach.position}', CupertinoIcons.battery_charging, textPrimary, textSecondary)
+                    ? _nonPassengerView('Power Car / Luggage & Guard Van 🔋'.tr, '${'EOG Generator & Guard Van at position #'.tr}${widget.coach.position}', CupertinoIcons.battery_charging, textPrimary, textSecondary)
                     : isPantry
                         ? _pantryView(textPrimary, textSecondary)
                         : isDoubleDecker
@@ -398,8 +359,7 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
 
   static int? _toInt(dynamic value) {
     if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value.trim());
-    return null;
+    return int.tryParse(value?.toString() ?? '');
   }
 
   Widget _legendDot(Color color, String label, Color textSecondary) {
@@ -414,656 +374,9 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
         const SizedBox(width: 4),
         Text(
           label,
-          style: GoogleFonts.inter(color: textSecondary, fontSize: 9.5, fontWeight: FontWeight.bold),
+          style: GoogleFonts.inter(color: textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
         ),
       ],
-    );
-  }
-
-  Widget _buildBlueprintCabin(
-    Map<String, dynamic> cabin,
-    int index,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    final cabinNo = cabin['cabinNumber'] ?? cabin['bayNumber'] ?? index + 1;
-    final mainBerths = _asList(cabin['main'] ?? cabin['berths'] ?? cabin['seats']);
-    final sideBerths = _asList(cabin['side']);
-
-    if (mainBerths.isEmpty && sideBerths.isEmpty) return const SizedBox.shrink();
-
-    final bayBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bayBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderCol),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Bay / Cabin $cabinNo',
-                  style: GoogleFonts.inter(color: textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: mainBerths.map((b) => _buildApiSeat(b, isDark, textPrimary, textSecondary, borderCol)).toList(),
-                ),
-              ],
-            ),
-          ),
-          if (sideBerths.isNotEmpty) ...[
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  'Side Bay',
-                  style: GoogleFonts.inter(color: textSecondary, fontSize: 9, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  direction: Axis.vertical,
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: sideBerths.map((b) => _buildApiSeat(b, isDark, textPrimary, textSecondary, borderCol)).toList(),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildApiSeat(
-    dynamic value,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    if (value is Map) {
-      final seat = Map<String, dynamic>.from(value);
-      final number = seat['number'] ?? seat['seatNumber'] ?? seat['berthNumber'] ?? '—';
-      final type = seat['type'] ?? seat['berthType'] ?? seat['label'] ?? '';
-      return _seatBox('$number', '$type', status: seat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol);
-    }
-    return _seatBox(value.toString(), '', isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol);
-  }
-
-  static int _typicalSeatCount(String category) {
-    if (category.startsWith('H') || category == '1A') return 24;
-    if (category.startsWith('A') || category == '2A') return 54;
-    if (category.startsWith('B') || category == '3A') return 72;
-    if (category.startsWith('M') || category == '3E') return 83;
-    if (category.startsWith('S') || category == 'SL') return 72;
-    if (category == 'EC') return 45;
-    if (category == 'CC' || category == 'ACDC' || category == 'DDC') return 78;
-    if (category == '2S' || category == 'GEN' || category == 'GS' || category == 'UR') return 108;
-    return 72;
-  }
-
-  // AC Double Decker 3-Deck Seating Layout (Upper Deck, Lower Deck, Mezzanine)
-  Widget _doubleDeckerLayout(
-    int seatCount,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    return ListView(
-      controller: _scrollController,
-      physics: const BouncingScrollPhysics(),
-      children: [
-        _deckSectionCard(
-          title: 'UPPER DECK 🔼',
-          subtitle: 'Seats 1 – 50 (Upper Floor 3+2 Seating)',
-          startSeat: 1,
-          count: 50,
-          isThreePlusTwo: true,
-          isDark: isDark,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
-          borderCol: borderCol,
-        ),
-        const SizedBox(height: 14),
-        _deckSectionCard(
-          title: 'LOWER DECK 🔽',
-          subtitle: 'Seats 51 – 100 (Lower Floor 3+2 Seating)',
-          startSeat: 51,
-          count: 50,
-          isThreePlusTwo: true,
-          isDark: isDark,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
-          borderCol: borderCol,
-        ),
-        const SizedBox(height: 14),
-        _deckSectionCard(
-          title: 'MEZZANINE / END DECKS 🪜',
-          subtitle: 'Seats 101 – 120 (Entry Level 2+2 Seating)',
-          startSeat: 101,
-          count: 20,
-          isThreePlusTwo: false,
-          isDark: isDark,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
-          borderCol: borderCol,
-        ),
-      ],
-    );
-  }
-
-  Widget _deckSectionCard({
-    required String title,
-    required String subtitle,
-    required int startSeat,
-    required int count,
-    required bool isThreePlusTwo,
-    required bool isDark,
-    required Color textPrimary,
-    required Color textSecondary,
-    required Color borderCol,
-  }) {
-    final bayBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-    final rowSeatsCount = isThreePlusTwo ? 5 : 4;
-    final rowCount = (count / rowSeatsCount).ceil();
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bayBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderCol),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0A84FF).withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  title,
-                  style: GoogleFonts.inter(
-                    color: const Color(0xFF0A84FF),
-                    fontWeight: FontWeight.w900,
-                    fontSize: 10.5,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(color: textSecondary, fontSize: 10, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...List.generate(rowCount, (rIdx) {
-            if (isThreePlusTwo) {
-              return _chairCarRow(rIdx, count, isDark, textPrimary, textSecondary, borderCol, startOffset: startSeat - 1);
-            } else {
-              return _executiveChairRow(rIdx, count, isDark, textPrimary, textSecondary, borderCol, startOffset: startSeat - 1);
-            }
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTypicalLayout(
-    String category,
-    int seatCount,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    if (seatCount <= 0) return _noSeatData(textSecondary);
-
-    if (category.startsWith('H') || category == '1A') {
-      final cabinCount = (seatCount / 4).ceil();
-      return ListView.builder(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(),
-        itemCount: cabinCount,
-        itemBuilder: (_, index) => _firstClassCabinBay(index, seatCount, isDark, textPrimary, textSecondary, borderCol),
-      );
-    }
-
-    if (category == 'EC') {
-      final rowCount = (seatCount / 4).ceil();
-      return ListView.builder(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(),
-        itemCount: rowCount,
-        itemBuilder: (_, index) => _executiveChairRow(index, seatCount, isDark, textPrimary, textSecondary, borderCol),
-      );
-    }
-
-    if (category == 'CC' || category == '2S' || category == 'GEN' || category == 'GS' || category == 'UR') {
-      final rowCount = (seatCount / 5).ceil();
-      return ListView.builder(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(),
-        itemCount: rowCount,
-        itemBuilder: (_, index) => _chairCarRow(index, seatCount, isDark, textPrimary, textSecondary, borderCol),
-      );
-    }
-
-    final isTwoTier = category.startsWith('A') || category == '2A';
-    final is3Economy = category.startsWith('M') || category == '3E';
-    final seatsPerBay = isTwoTier ? 6 : (is3Economy ? 9 : 8);
-    final bayCount = (seatCount / seatsPerBay).ceil();
-
-    return ListView.builder(
-      controller: _scrollController,
-      physics: const BouncingScrollPhysics(),
-      itemCount: bayCount,
-      itemBuilder: (_, bayIndex) => _sleeperBay(bayIndex, seatCount, isTwoTier, is3Economy, isDark, textPrimary, textSecondary, borderCol),
-    );
-  }
-
-  Widget _firstClassCabinBay(
-    int cabinIndex,
-    int seatCount,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    final start = cabinIndex * 4 + 1;
-    final cabinLetter = String.fromCharCode(65 + (cabinIndex % 26));
-    final isCoupe = cabinIndex % 2 == 1 && (start + 1 <= seatCount);
-
-    final bayBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bayBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderCol),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(CupertinoIcons.lock_fill, color: Color(0xFF0A84FF), size: 14),
-              const SizedBox(width: 6),
-              Text(
-                'First AC ${isCoupe ? "Coupe" : "Cabin"} -$cabinLetter',
-                style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
-              ),
-              const Spacer(),
-              Text(
-                isCoupe ? '2 Berths' : '4 Berths',
-                style: GoogleFonts.inter(color: textSecondary, fontSize: 10),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _layoutSeat(start, 'LOWER', visible: start <= seatCount, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _layoutSeat(start + 1, 'UPPER', visible: start + 1 <= seatCount, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-              ),
-            ],
-          ),
-          if (!isCoupe && start + 2 <= seatCount) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _layoutSeat(start + 2, 'LOWER', visible: start + 2 <= seatCount, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _layoutSeat(start + 3, 'UPPER', visible: start + 3 <= seatCount, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _sleeperBay(
-    int bayIndex,
-    int seatCount,
-    bool isTwoTier,
-    bool is3Economy,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    final seatsPerBay = isTwoTier ? 6 : (is3Economy ? 9 : 8);
-    final start = bayIndex * seatsPerBay + 1;
-    final bayBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-
-    final mainCount = isTwoTier ? 4 : 6;
-    final mainBerths = List.generate(mainCount, (i) => start + i);
-    final mainLabels = isTwoTier
-        ? ['LOWER', 'UPPER', 'LOWER', 'UPPER']
-        : ['LOWER', 'MIDDLE', 'UPPER', 'LOWER', 'MIDDLE', 'UPPER'];
-
-    final sideStart = start + mainCount;
-    final sideCount = is3Economy ? 3 : 2;
-    final sideBerths = List.generate(sideCount, (i) => sideStart + i);
-    final sideLabels = is3Economy
-        ? ['SIDE LOWER', 'SIDE MIDDLE', 'SIDE UPPER']
-        : ['SIDE LOWER', 'SIDE UPPER'];
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bayBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderCol),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Bay ${bayIndex + 1}',
-                style: GoogleFonts.inter(color: textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Main Bay Berths
-              Expanded(
-                flex: 3,
-                child: Column(
-                  children: [
-                    Row(
-                      children: List.generate(mainCount ~/ 2, (i) {
-                        final seatNo = mainBerths[i];
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: _layoutSeat(seatNo, mainLabels[i], visible: seatNo <= seatCount, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: List.generate(mainCount ~/ 2, (i) {
-                        final idx = (mainCount ~/ 2) + i;
-                        final seatNo = mainBerths[idx];
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: _layoutSeat(seatNo, mainLabels[idx], visible: seatNo <= seatCount, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                          ),
-                        );
-                      }),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Gangway Aisle Divider
-              Container(
-                width: 16,
-                alignment: Alignment.center,
-                child: Container(
-                  width: 1.5,
-                  height: 90,
-                  color: borderCol,
-                ),
-              ),
-
-              // Side Bay Berths
-              Expanded(
-                flex: 1,
-                child: Column(
-                  children: List.generate(sideCount, (i) {
-                    final seatNo = sideBerths[i];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: _layoutSeat(seatNo, sideLabels[i], visible: seatNo <= seatCount, side: true, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                    );
-                  }),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chairCarRow(
-    int rowIndex,
-    int seatCount,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol, {
-    int startOffset = 0,
-  }) {
-    final start = startOffset + rowIndex * 5 + 1;
-    final maxSeat = startOffset + seatCount;
-    final bayBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-
-    final leftSeats = [start, start + 1, start + 2];
-    final leftLabels = ['WINDOW', 'MIDDLE', 'AISLE'];
-
-    final rightSeats = [start + 3, start + 4];
-    final rightLabels = ['AISLE', 'WINDOW'];
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: bayBg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderCol),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Row(
-              children: List.generate(3, (i) {
-                final seatNo = leftSeats[i];
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: _layoutSeat(seatNo, leftLabels[i], visible: seatNo <= maxSeat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                  ),
-                );
-              }),
-            ),
-          ),
-          Container(
-            width: 18,
-            alignment: Alignment.center,
-            child: Text(
-              'AISLE',
-              style: GoogleFonts.inter(color: textSecondary.withValues(alpha: 0.5), fontSize: 7, fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: List.generate(2, (i) {
-                final seatNo = rightSeats[i];
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: _layoutSeat(seatNo, rightLabels[i], visible: seatNo <= maxSeat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol),
-                  ),
-                );
-              }),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _executiveChairRow(
-    int rowIndex,
-    int seatCount,
-    bool isDark,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol, {
-    int startOffset = 0,
-  }) {
-    final start = startOffset + rowIndex * 4 + 1;
-    final maxSeat = startOffset + seatCount;
-    final bayBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: bayBg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderCol),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(child: _layoutSeat(start, 'WINDOW', visible: start <= maxSeat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol)),
-                const SizedBox(width: 4),
-                Expanded(child: _layoutSeat(start + 1, 'AISLE', visible: start + 1 <= maxSeat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol)),
-              ],
-            ),
-          ),
-          Container(
-            width: 24,
-            alignment: Alignment.center,
-            child: Text(
-              'AISLE',
-              style: GoogleFonts.inter(color: textSecondary.withValues(alpha: 0.5), fontSize: 7, fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(child: _layoutSeat(start + 2, 'AISLE', visible: start + 2 <= maxSeat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol)),
-                const SizedBox(width: 4),
-                Expanded(child: _layoutSeat(start + 3, 'WINDOW', visible: start + 3 <= maxSeat, isDark: isDark, textPrimary: textPrimary, textSecondary: textSecondary, borderCol: borderCol)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _layoutSeat(
-    int number,
-    String label, {
-    required bool visible,
-    bool side = false,
-    required bool isDark,
-    required Color textPrimary,
-    required Color textSecondary,
-    required Color borderCol,
-  }) {
-    if (!visible) return const SizedBox.shrink();
-    final selected = _selectedSeat == '$number';
-
-    final seatBg = selected
-        ? const Color(0xFF0A84FF)
-        : (isDark ? const Color(0xFF16161C) : const Color(0xFFFFFFFF));
-
-    final seatTextColor = selected ? Colors.white : textPrimary;
-    final labelColor = selected ? Colors.white70 : textSecondary;
-
-    return GestureDetector(
-      onTap: () => _selectSeat('$number'),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        constraints: const BoxConstraints(minHeight: 52),
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
-        decoration: BoxDecoration(
-          color: seatBg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? const Color(0xFF0A84FF) : borderCol,
-            width: selected ? 2 : 1,
-          ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFF0A84FF).withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  )
-                ]
-              : [],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.inter(
-                color: labelColor,
-                fontWeight: FontWeight.bold,
-                fontSize: side ? 7.5 : 8.5,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '$number',
-              style: GoogleFonts.inter(
-                color: seatTextColor,
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1072,174 +385,357 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 110,
-            height: 110,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0A84FF).withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              icon,
-              color: const Color(0xFF0A84FF),
-              size: 48,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            style: GoogleFonts.inter(
-              color: textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Icon(icon, size: 48, color: const Color(0xFF0A84FF)),
+          const SizedBox(height: 12),
+          Text(title, style: GoogleFonts.inter(color: textPrimary, fontSize: 15, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              color: textSecondary,
-              fontSize: 11.5,
-            ),
-          ),
+          Text(subtitle, style: GoogleFonts.inter(color: textSecondary, fontSize: 11)),
         ],
       ),
     );
   }
 
   Widget _pantryView(Color textPrimary, Color textSecondary) {
-    return _nonPassengerView('Pantry Car 🍽️', 'Catering & kitchen unit at position #${widget.coach.position}', CupertinoIcons.scissors, textPrimary, textSecondary);
-  }
-
-  Widget _noSeatData(Color textSecondary) {
     return Center(
-      child: Text(
-        'Seat layout is not available for this coach.',
-        textAlign: TextAlign.center,
-        style: GoogleFonts.inter(color: textSecondary, fontSize: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(CupertinoIcons.sparkles, size: 48, color: Color(0xFFFF9F0A)),
+          const SizedBox(height: 12),
+          Text('Onboard Catering & Kitchen Pantry Car 🍳'.tr, style: GoogleFonts.inter(color: textPrimary, fontSize: 15, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text('Contains food prep equipment, refrigerators & staff catering area.'.tr, textAlign: TextAlign.center, style: GoogleFonts.inter(color: textSecondary, fontSize: 11)),
+        ],
       ),
     );
   }
 
-  void _scrollToSeat(String seatNumber) {
-    if (!_scrollController.hasClients) return;
-    final seatIndex = int.tryParse(seatNumber);
-    if (seatIndex == null || seatIndex < 1) return;
-    final category = widget.coach.category.toUpperCase();
-    final isDoubleDecker = widget.coach.isDoubleDecker || category == 'ACDC' || category == 'DDC' || category.contains('DOUBLE');
+  Widget _doubleDeckerLayout(int totalSeats, bool isDark, Color textPrimary, Color textSecondary, Color borderCol) {
+    final lowerCount = (totalSeats * 0.45).round();
+    final upperCount = (totalSeats * 0.45).round();
+    final mezzanineCount = totalSeats - lowerCount - upperCount;
 
-    if (isDoubleDecker) {
-      double offset = 0;
-      if (seatIndex > 100) {
-        offset = 800.0;
-      } else if (seatIndex > 50) {
-        offset = 400.0;
-      }
-      _scrollController.animateTo(
-        offset.clamp(0.0, _scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeInOut,
-      );
-      return;
-    }
-
-    final hasExactLayout = _readCabins(_findBlueprint()).isNotEmpty;
-    final seatsPerBay = isFirstClass(category) ? 4 : _seatsPerBay(category);
-    final bayHeight = 110.0;
-    final offset =
-        (hasExactLayout
-                ? ((seatIndex - 1) ~/ 4) * 58.0
-                : ((seatIndex - 1) ~/ seatsPerBay) * bayHeight)
-            .clamp(0.0, _scrollController.position.maxScrollExtent);
-    _scrollController.animateTo(
-      offset,
-      duration: const Duration(milliseconds: 450),
-      curve: Curves.easeInOut,
+    return ListView(
+      physics: const BouncingScrollPhysics(),
+      children: [
+        _deckSection('UPPER DECK CHAIR CAR 🔝'.tr, 1, upperCount, isDark, textPrimary, textSecondary, borderCol),
+        const SizedBox(height: 16),
+        _deckSection('MEZZANINE END DECK 🚪'.tr, upperCount + 1, upperCount + mezzanineCount, isDark, textPrimary, textSecondary, borderCol),
+        const SizedBox(height: 16),
+        _deckSection('LOWER DECK CHAIR CAR 🔽'.tr, upperCount + mezzanineCount + 1, totalSeats, isDark, textPrimary, textSecondary, borderCol),
+      ],
     );
   }
 
-  bool isFirstClass(String category) => category.startsWith('H') || category == '1A';
+  Widget _deckSection(String title, int start, int end, bool isDark, Color textPrimary, Color textSecondary, Color borderCol) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: GoogleFonts.inter(color: const Color(0xFF0A84FF), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
+      const SizedBox(height: 8),
+      _buildTypicalChairCar(start, end, isDark, textPrimary, textSecondary, borderCol),
+    ],
+  );
 
-  int _seatsPerBay(String category) {
-    if (category.startsWith('A') || category == '2A') return 6;
-    if (category.startsWith('M') || category == '3E') return 9;
-    if (category == 'EC') return 4;
-    if (category == 'CC' || category == '2S' || category == 'GS' || category == 'ACDC' || category == 'DDC') return 5;
-    return 8;
-  }
+  Widget _buildBlueprintCabin(Map<String, dynamic> cabin, int index, bool isDark, Color textPrimary, Color textSecondary, Color borderCol) {
+    final title = (cabin['name'] ?? cabin['title'] ?? cabin['label'] ?? 'CABIN / BAY ${index + 1}').toString();
+    final mainSeats = _asList(cabin['main'] ?? cabin['seats'] ?? cabin['left']);
+    final sideSeats = _asList(cabin['side'] ?? cabin['right']);
 
-  Widget _seatBox(
-    String number,
-    String type, {
-    Map<String, dynamic>? status,
-    required bool isDark,
-    required Color textPrimary,
-    required Color textSecondary,
-    required Color borderCol,
-  }) {
-    final selected = _selectedSeat == number;
-    final seatColor = _statusColor(status);
-    final borderColor = selected ? const Color(0xFF0A84FF) : seatColor;
-    return GestureDetector(
-      onTap: number == '—'
-          ? null
-          : () => _selectSeat(number),
-      child: Container(
-        margin: const EdgeInsets.all(2),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF0A84FF)
-              : seatColor.withValues(alpha: status == null ? 0.1 : 0.2),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: borderColor, width: selected ? 2 : 1),
-        ),
-        child: Column(
-          children: [
-            Text(
-              number,
-              style: GoogleFonts.inter(
-                color: selected ? Colors.white : textPrimary,
-                fontWeight: FontWeight.w900,
-                fontSize: 12,
-              ),
-            ),
-            if (type.isNotEmpty)
-              Text(
-                type,
-                style: GoogleFonts.inter(
-                  color: selected ? Colors.white70 : textSecondary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 8,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderCol),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title.toUpperCase().tr, style: GoogleFonts.inter(color: textSecondary, fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: mainSeats.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
                 ),
               ),
-          ],
+              if (sideSeats.isNotEmpty) ...[
+                Container(width: 1, height: 40, color: borderCol, margin: const EdgeInsets.symmetric(horizontal: 8)),
+                Expanded(
+                  flex: 2,
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: sideSeats.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypicalLayout(String category, int seatCount, bool isDark, Color textPrimary, Color textSecondary, Color borderCol) {
+    if (category == 'EC') {
+      return _buildTypicalChairCar2x2(1, seatCount, isDark, textPrimary, textSecondary, borderCol);
+    }
+    if (category == 'CC' || category == '2S' || category == 'GS' || category == 'GEN' || category == 'UR') {
+      return _buildTypicalChairCar(1, seatCount, isDark, textPrimary, textSecondary, borderCol);
+    }
+
+    final is2A = category.startsWith('A') || category == '2A';
+    final is1A = category.startsWith('H') || category == '1A';
+    final is3E = category.startsWith('M') || category == '3E';
+    final baySize = is1A ? 4 : (is2A ? 6 : (is3E ? 9 : 8));
+    final cabinCount = (seatCount / baySize).ceil();
+
+    return ListView.builder(
+      controller: _scrollController,
+      physics: const BouncingScrollPhysics(),
+      itemCount: cabinCount,
+      itemBuilder: (_, index) {
+        final start = index * baySize + 1;
+        final end = (start + baySize - 1).clamp(1, seatCount);
+        final title = is1A ? 'CABIN / COUPE ${index + 1}' : 'BAY ${index + 1} (#$start - #$end)';
+
+        final mainList = <int>[];
+        final sideList = <int>[];
+
+        for (var i = start; i <= end; i++) {
+          if (is1A) {
+            mainList.add(i);
+          } else if (is2A) {
+            final rem = i % 6;
+            if (rem == 5 || rem == 0) {
+              sideList.add(i);
+            } else {
+              mainList.add(i);
+            }
+          } else if (is3E) {
+            final rem = i % 9;
+            if (rem == 7 || rem == 8 || rem == 0) {
+              sideList.add(i);
+            } else {
+              mainList.add(i);
+            }
+          } else {
+            final rem = i % 8;
+            if (rem == 7 || rem == 0) {
+              sideList.add(i);
+            } else {
+              mainList.add(i);
+            }
+          }
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF09090C) : const Color(0xFFF8F9FA),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderCol),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title.tr, style: GoogleFonts.inter(color: textSecondary, fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: mainList.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                    ),
+                  ),
+                  if (sideList.isNotEmpty) ...[
+                    Container(width: 1, height: 40, color: borderCol, margin: const EdgeInsets.symmetric(horizontal: 8)),
+                    Expanded(
+                      flex: 2,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: sideList.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTypicalChairCar(int start, int end, bool isDark, Color textPrimary, Color textSecondary, Color borderCol) {
+    final rows = <List<int>>[];
+    for (var i = start; i <= end; i += 5) {
+      final row = <int>[];
+      for (var j = i; j < i + 5 && j <= end; j++) {
+        row.add(j);
+      }
+      rows.add(row);
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      physics: const BouncingScrollPhysics(),
+      itemCount: rows.length,
+      itemBuilder: (_, index) {
+        final row = rows[index];
+        final left3 = row.take(3).toList();
+        final right2 = row.skip(3).toList();
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: left3.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 2,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: right2.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTypicalChairCar2x2(int start, int end, bool isDark, Color textPrimary, Color textSecondary, Color borderCol) {
+    final rows = <List<int>>[];
+    for (var i = start; i <= end; i += 4) {
+      final row = <int>[];
+      for (var j = i; j < i + 4 && j <= end; j++) {
+        row.add(j);
+      }
+      rows.add(row);
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      physics: const BouncingScrollPhysics(),
+      itemCount: rows.length,
+      itemBuilder: (_, index) {
+        final row = rows[index];
+        final left2 = row.take(2).toList();
+        final right2 = row.skip(2).toList();
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: left2.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: right2.map((s) => _seatBox(s, isDark, textPrimary, borderCol)).toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _seatBox(dynamic seatData, bool isDark, Color textPrimary, Color borderCol) {
+    late String seatNo;
+    late String status;
+
+    if (seatData is Map) {
+      seatNo = (seatData['no'] ?? seatData['number'] ?? seatData['seat'] ?? '').toString();
+      status = (seatData['status'] ?? seatData['state'] ?? 'AVAILABLE').toString().toUpperCase();
+    } else {
+      seatNo = seatData.toString();
+      status = 'AVAILABLE';
+    }
+
+    final isSelected = _selectedSeat == seatNo;
+    final isBooked = status == 'BOOKED' || status == 'OCCUPIED';
+
+    Color boxBg = isDark ? const Color(0xFF16161C) : Colors.white;
+    Color textCol = textPrimary;
+    Color border = borderCol;
+
+    if (isBooked) {
+      boxBg = const Color(0xFFFF9F0A).withValues(alpha: 0.15);
+      textCol = const Color(0xFFFF9F0A);
+      border = const Color(0xFFFF9F0A).withValues(alpha: 0.4);
+    } else if (status == 'AVAILABLE') {
+      boxBg = const Color(0xFF30D158).withValues(alpha: 0.12);
+      textCol = isDark ? const Color(0xFF30D158) : const Color(0xFF248A3D);
+      border = const Color(0xFF30D158).withValues(alpha: 0.3);
+    }
+
+    if (isSelected) {
+      boxBg = const Color(0xFF0A84FF);
+      textCol = Colors.white;
+      border = const Color(0xFF0A84FF);
+    }
+
+    return GestureDetector(
+      onTap: () => _selectSeat(seatNo),
+      child: Container(
+        width: 38,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: boxBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: border, width: isSelected ? 1.5 : 1.0),
+          boxShadow: isSelected
+              ? [BoxShadow(color: const Color(0xFF0A84FF).withValues(alpha: 0.4), blurRadius: 6)]
+              : null,
+        ),
+        child: Text(
+          seatNo,
+          style: GoogleFonts.inter(
+            color: textCol,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+          ),
         ),
       ),
     );
   }
 
-  Color _statusColor(Map<String, dynamic>? seat) {
-    if (seat == null) return const Color(0xFF8E8E93);
-    final isAvailable = seat['available'] ?? seat['isAvailable'];
-    final isBooked = seat['booked'] ?? seat['isBooked'];
-    if (isAvailable == true || isBooked == false) return const Color(0xFF30D158);
-    if (isAvailable == false || isBooked == true) return const Color(0xFFFF9F0A);
-
-    final status = (seat['status'] ?? seat['berthStatus'] ?? '')
-        .toString()
-        .toLowerCase();
-    if (status.contains('avail') || status == 'avl' || status == 'free') {
-      return const Color(0xFF30D158);
-    }
-    if (status.contains('book') ||
-        status.contains('occup') ||
-        status.contains('confirm') ||
-        status == 'rac' ||
-        status == 'wl') {
-      return const Color(0xFFFF9F0A);
-    }
-    return const Color(0xFF8E8E93);
+  int _guessSeatCount(String category) {
+    if (category.startsWith('H') || category == '1A') return 24;
+    if (category.startsWith('A') || category == '2A') return 54;
+    if (category.startsWith('B') || category == '3A') return 72;
+    if (category.startsWith('M') || category == '3E') return 83;
+    if (category.startsWith('S') || category == 'SL') return 72;
+    if (category == 'EC') return 56;
+    if (category == 'CC') return 78;
+    if (category == 'ACDC' || category == 'DDC') return 120;
+    return 80;
   }
 }

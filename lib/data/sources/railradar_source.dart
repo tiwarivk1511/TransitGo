@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/cache/offline_cache.dart';
+import '../../core/utils/security_utils.dart';
 import 'station_source.dart';
 
 /// RailRadar Open Web API Client — 100% Free Open Web Endpoints (Zero API Key Required)
@@ -167,7 +168,7 @@ class RailRadarSource {
 
     // 2. CORS Proxy Fallback for Web/Browser Client Exception Failures
     try {
-      final proxyUri = Uri.parse('https://corsproxy.io/?${Uri.encodeComponent(primaryUri.toString())}');
+      final proxyUri = Uri.parse('${SecurityUtils.corsProxyUrl}${Uri.encodeComponent(primaryUri.toString())}');
       final res = await http.get(proxyUri).timeout(t);
       if (res.statusCode == 200) {
         return json.decode(res.body);
@@ -191,7 +192,7 @@ class RailRadarSource {
 
     final cacheKey = 'live_$cleanNo';
     final uri = Uri.parse(
-      'https://railradar.in/app/v1/trains/$cleanNo/live'
+      '${SecurityUtils.railRadarTrainsUrl}$cleanNo/live'
       '?geometry=${includeGeometry ? "true" : "false"}'
       '&format=polyline'
       '&includeCoordinates=true'
@@ -235,7 +236,7 @@ class RailRadarSource {
     if (f.isEmpty || t.isEmpty) return null;
 
     final uri = Uri.parse(
-      'https://railradar.in/app/v1/trains/between/$f/$t?byCity=true'
+      '${SecurityUtils.railRadarTrainsUrl}between/$f/$t?byCity=true'
       '${date != null && date.isNotEmpty ? "&date=$date" : ""}',
     );
 
@@ -262,7 +263,7 @@ class RailRadarSource {
     if (code.isEmpty) return null;
 
     final uri = Uri.parse(
-      'https://railradar.in/app/v1/stations/$code/live?hours=$hours&includeIntermediate=true',
+      '${SecurityUtils.railRadarBaseUrl}stations/$code/live?hours=$hours&includeIntermediate=true',
     );
 
     final body = await _getJsonWithCorsFallback(uri);
@@ -282,7 +283,7 @@ class RailRadarSource {
   // ═══════════════════════════════════════════════════════════════════
   static Future<List<dynamic>?> liveMap() async {
     const cacheKey = 'radar_live_map_cache';
-    final uri = Uri.parse('https://railradar.in/app/v1/live-map');
+    final uri = Uri.parse(SecurityUtils.railRadarLiveMapUrl);
 
     final body = await _getJsonWithCorsFallback(uri);
     if (body != null) {

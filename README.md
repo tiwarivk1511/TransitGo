@@ -1,20 +1,21 @@
 # 🚆 TransitGo — Ultra Premium Apple iOS Themed Indian Railways & Metro Transit Platform
 
-**TransitGo** is a high-performance, cross-platform Flutter application engineered for real-time tracking, GIS mapping, national disruption alerts, PNR enquiries, fare breakdowns, 2D architectural coach seat maps, and urban metro navigation across India. Powered by an **Open Web Dual-Engine Transit Architecture** with **MNTES Scraper Failover** and **Offline-First SQLite Persistence**, TransitGo delivers instant, reliable transit telemetry under any network conditions.
+**TransitGo** is a high-performance, cross-platform Flutter application engineered for real-time tracking, GIS mapping, national disruption alerts, PNR enquiries, fare breakdowns, 2D architectural coach seat maps, and urban metro navigation across India. Powered by an **Open Web Dual-Engine Transit Architecture** with **MNTES Scraper Failover**, **Base64 XOR Endpoint Security**, **Anti-Frida Hooking Protection**, and **Offline-First SQLite Persistence**, TransitGo delivers instant, reliable transit telemetry under any network conditions.
 
 ---
 
 ## 🌟 Key Highlights & Innovations
 
-- 📡 **National Live GIS Radar Map (`/live-map`)**: Real-time map displaying **2,000+ active trains** across India with rotated directional markers (`bearing` angle), category filters, live search camera focus, and decoded track polyline geometry.
-- 🚆 **Live Train Tracking & Corridor Crossings (XING)**: Real-time train telemetry, dual speedometer (Mode 0: Internet Telemetry, Mode 1: Device Onboard Satellite GPS), exact station anchoring (`_trainLatLng`), and Corridor Ladder track UI showing same-direction (`↓`) and opposite-direction (`↑`) passing trains.
-- 🚨 **National Disruption Alerts (`/trains/exceptions`)**: Real-time national cancellation alerts, rescheduled departure times, route diversions, and station delay board metrics.
-- 🚉 **Live Station Traffic Board (`/stations/{code}/live`)**: Arrivals, departures, platform assignments, live status pills (`AT STATION`, `UPCOMING`, `RUNNING`, `NOT STARTED`), and configurable time windows (2h, 4h, 6h, 8h).
+- 🛡️ **Triple-Layer Endpoint Security & Anti-Frida Shield (`SecurityUtils`)**: All REST endpoints are Base64 + Bitwise XOR masked in runtime memory, stripping plaintext URLs from binary string tables. Active Frida-server port scanning (27042/27043) and process memory map inspection (`/proc/self/maps`) invalidate decryption keys (`_maskKey ^= 0xFF`) on dynamic hook attempts.
+- 📡 **National Live GIS Radar Map (`radar_screen.dart`)**: Real-time map displaying **2,000+ active trains** across India with rotated directional markers (`bearing` angle), category filters, live search camera focus, and station-anchored track polyline geometry.
+- 🚆 **Live Train Tracking & Station Snapping (`train_map_screen.dart`)**: Real-time train telemetry, dual speedometer (Mode 0: Internet Telemetry, Mode 1: Device Onboard Satellite GPS), and station-anchor polyline snapping (`_snapStationAnchorsToTrack`) ensuring 100% pixel-perfect track alignment with 0.0m station gap.
+- 🎨 **Apple HIG Glassmorphic UI & Ambient Mesh Theme**: Modern ambient mesh gradient background (`ModernBackground`) with 3 blurred glowing ambient light orbs, frosted glass cards (`AppleGlassCard` with `BackdropFilter` `sigma: 14`), and complete Apple Light (`#F2F2F7`) and OLED Pitch-Black Midnight (`#030305`) dark mode themes.
+- 🚨 **National Disruption Alerts (`alerts_screen.dart`)**: Real-time national cancellation alerts, rescheduled departure times, route diversions, and station delay board metrics.
+- 🚉 **Live Station Traffic Board (`live_traffic_screen.dart`)**: Arrivals, departures, platform assignments, live status pills (`AT STATION`, `UPCOMING`, `RUNNING`, `NOT STARTED`), and configurable time windows (2h, 4h, 6h, 8h).
 - 🛋️ **Aerodynamic Rakes & 2D Seat Maps**: Namo Bharat RRTS / Vande Bharat bullet train rake views and class-specific 2D architectural seat maps (1A First AC with locking door 🔒, 2A, 3A, 3E, SL, EC, CC, 2S, GS) with a direct seat number search tool ("Find Seat #42").
 - 🎫 **PNR & Fare Breakdown**: Open web 10-digit PNR enquiry and detailed ticket fare breakdown (base fare, reservation charge, superfast fee, GST/service tax, catering, tatkal charge).
 - 🚇 **Indian Metro Transit Systems**: Multi-city metro route planner (Delhi NCR, Mumbai, Bengaluru, Kolkata, Chennai, Hyderabad, Pune, Ahmedabad, Lucknow, Jaipur, Kanpur, Nagpur, Kochi, Noida, Agra, etc.), live Open Web Route Engine, station network feeds, line switch itineraries, fare calculator, interactive GIS map, and high-res vector SVG system map viewer (`MetroMapViewer`).
-- 🎨 **Apple iOS Design System & Theme Engine**: Complete Apple Light (`#F2F2F7` / `#FFFFFF` / `#1C1C1E`) and Dark (`#09090C` / `#16161C` / `#FFFFFF`) mode reactivity with SF Pro / Inter typography and glassmorphic cards.
-- 🔥 **Firebase Crashlytics & Remote Config**: Global error handling with `CrashlyticsService` capturing non-fatal and fatal exceptions across all Flutter and Dart platform channels, and dynamic parameter fetching with `RemoteConfigService`.
+- ⚡ **Polyline & Search Memory Caching**: Sub-microsecond polyline decoding memoization (`_polylineMemoryCache`) and instant 0ms autocomplete query caching (`_searchMemoryCache`, `_stationMemoryCache`).
 
 ---
 
@@ -23,6 +24,7 @@
 | Category | Package Name | Version | Purpose & Usage |
 | :--- | :--- | :--- | :--- |
 | **Firebase Suite** | `firebase_core` | `^3.10.0` | Firebase project initialization across Android, iOS, Web & Desktop |
+| | `firebase_analytics` | `^11.6.0` | Project-wide user telemetry, screen views & feature event tracking |
 | | `firebase_crashlytics` | `^4.3.0` | Real-time automated crash reporting & exception diagnostics |
 | | `firebase_remote_config` | `^5.3.0` | Dynamic parameter configuration and remote station parameters |
 | **Network & Web API** | `http` | `^1.2.0` | High-performance REST HTTP client for live transit telemetries |
@@ -50,16 +52,18 @@
 
 ---
 
-## 🛠️ Architecture & Tech Stack
+## 🛠️ Architecture & Security Tech Stack
 
 | Domain | Technology / Package | Description |
 | :--- | :--- | :--- |
 | **Framework** | Flutter / Dart | High-performance, cross-platform mobile app framework |
+| **Endpoint Security** | `SecurityUtils` | Base64 + Bitwise XOR endpoint obfuscation stripping plaintext URLs from binary string tables |
+| **Anti-Hooking Shield** | Anti-Frida Detector | Active Frida-server port (27042/27043) and process map inspection with dynamic key invalidation |
 | **Theme Engine** | `ThemeController` | ListenableBuilder at root (`app.dart`) for instant Light/Dark mode toggling |
 | **Open Web API Engine** | Open Web Transit Services | Open web REST endpoints requiring **zero API key** for live tracking, map radar, PNR, fare, crossings, and exceptions |
 | **Metro Open Web Engine** | Metro Transit Route Engine | Live Open Web Route Search API, dynamic station network feeds, and Firebase Remote Config |
 | **Failover Engine** | `NtesSource` / `MntesClient` | Session-aware MNTES HTML scraper with rotating User-Agents, circuit breaking, and cookie management |
-| **GIS Mapping** | `flutter_map` + `latlong2` | High-speed vector/raster map rendering with Map Satellite Transit and CartoDB Dark layers |
+| **GIS Mapping** | `flutter_map` + `latlong2` | High-speed vector/raster map rendering with Google Maps Satellite Transit and CartoDB Dark layers |
 | **Local Database** | `sqflite` + `OfflineCache` | SQLite caching for station catalog (13,006 stations with City, District, State), recent searches, and favorite trains |
 | **Monitoring & Crash Reporting** | `firebase_crashlytics` + `firebase_core` | Automated crash logging and diagnostic exception reporting |
 | **Configuration** | `firebase_remote_config` + `flutter_dotenv` | Dynamic parameters and environment configuration |
@@ -81,13 +85,13 @@ TransitGo/
 │   ├── main.dart              # Entry point with Firebase & Crashlytics initialization
 │   ├── components/            # Reusable UI widgets & components
 │   │   ├── coach/             # Aerodynamic rake views & 2D architectural coach seat maps
-│   │   ├── common/            # Error box, loading indicators, dual speedometer card
+│   │   ├── common/            # Error box, loading indicators, dual speedometer card, AppleGlassCard, ModernBackground
 │   │   ├── station/           # Theme-aware station autocomplete input dropdowns
 │   │   └── train/             # Corridor ladder crossings view & train search autocomplete
 │   ├── core/
 │   │   ├── cache/             # SQLite cache, recent search history, and favorite trains
 │   │   ├── theme/             # ThemeController (Light/Dark mode listener)
-│   │   └── utils/             # Permission helpers, responsive layout helpers
+│   │   └── utils/             # SecurityUtils (Base64 XOR + Anti-Frida), Permission helpers
 │   ├── data/
 │   │   ├── models/            # Data models (Train, Station, PNR, Fare, Coach, Traffic, Metro)
 │   │   └── sources/           # RailRadarSource, NtesSource, StationSource, LiveStreamSource
@@ -100,14 +104,14 @@ TransitGo/
 │   │   │   ├── live_traffic/  # Station Live Traffic Board Screen
 │   │   │   ├── metro/         # Indian Metro Transit, Interactive Vector Map & Viewer
 │   │   │   ├── pnr/           # PNR Enquiry & Passenger Status Screen
-│   │   │   ├── schedule/      # National Live Radar Map Screen (2,000+ trains live)
+│   │   │   ├── radar/         # National Live Radar Map Screen (2,000+ trains live)
 │   │   │   └── station_info/  # Station Details, Helplines & Map Area Screen
 │   │   ├── home/              # Apple iOS Bento Dashboard Screen
 │   │   ├── splash/            # Splash Screen
 │   │   ├── train_details/     # Live Train Tracking, Timeline & Crossing Tabs Screen
 │   │   ├── train_map/         # Train GIS Map with animated pulse marker & speedometer
 │   │   └── train_search/      # Trains Between Stations Search Screen
-│   └── services/              # Business logic services (Train, Fare, PNR, Coach, Metro, RemoteConfig, Crashlytics)
+│   └── services/              # Business logic services (Train, Fare, PNR, Coach, Metro, RemoteConfig, Analytics, Crashlytics)
 └── pubspec.yaml               # Project dependencies & assets manifest
 ```
 
@@ -115,17 +119,18 @@ TransitGo/
 
 ## ⚡ Core Feature Deep Dive
 
-### 1. 📡 National Live Radar Map (`schedule_screen.dart`)
+### 1. 📡 National Live Radar Map (`radar_screen.dart`)
 - Powered by live Open Web GIS Radar services.
-- Plots **2,000+ active trains** across India on Map Satellite Transit or CartoDB Dark layers.
+- Plots **2,000+ active trains** across India on Google Maps Satellite Transit or CartoDB Dark layers.
 - Custom train markers rotated according to exact `bearing` angle in degrees.
-- Instant search camera focus for any train number or station code.
-- Decodes route `encodedPolyline` to render the full track path on the map.
+- Instant search camera focus with `TrainNumberAutocomplete` for any train number or station code.
+- Decodes route `encodedPolyline` to render the full track path on the map with station anchor snapping.
 
 ### 2. 🚆 Live Train Tracking & GIS Map (`train_details_screen.dart`, `train_map_screen.dart`)
 - Real-time running status, current location, arrival/departure delays, and platform assignments.
 - Exact station coordinate anchoring (`_trainLatLng`) when halted or at station, with smooth 3-second lerp animations when running.
 - Dual Speedometer (`live_speed_card.dart`) supporting Mode 0 (Internet Telemetry) and Mode 1 (Device Onboard Satellite GPS).
+- Automatic smooth scrolling to current live train station card on timeline.
 
 ### 3. 🔀 Corridor Crossings (XING) (`train_crossing_view.dart`)
 - Corridor Ladder track UI displaying same-direction (`↓`) and opposite-direction (`↑`) passing trains along with current train location (`YOU`).
@@ -203,8 +208,8 @@ git push -u origin main
 ## 🎨 Theme & Accessibility Design System
 
 TransitGo strictly adheres to **Apple's Human Interface Guidelines**:
-- **Light Mode**: Scaffold Background `#F2F2F7`, Card Background `#FFFFFF`, Primary Text `#1C1C1E`, Secondary Text `#636366` (WebAIM AAA contrast compliant).
-- **Dark Mode**: Scaffold Background `#09090C`, Card Background `#16161C`, Primary Text `#FFFFFF`, Secondary Text `Colors.white54`.
+- **Light Mode**: Scaffold Background `#F2F2F7` (Ambient Soft Mesh), Glass Cards `#FFFFFF` (`0.88` opacity), Primary Text `#1C1C1E`, Secondary Text `#636366`.
+- **Dark Mode**: Scaffold Background `#030305` (OLED Pitch-Black Midnight), Glass Cards `#101320` (`0.82` opacity), Primary Text `#FFFFFF`, Secondary Text `#98989D`.
 - **System Accent**: Apple Blue `#0A84FF`, Green `#30D158`, Red `#FF375F`, Orange `#FF9F0A`.
 
 ---

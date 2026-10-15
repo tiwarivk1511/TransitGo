@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -38,9 +37,6 @@ class _SplashScreenState extends State<SplashScreen> {
       listenable: ThemeController.instance,
       builder: (context, _) {
         final isDark = ThemeController.instance.isDarkMode;
-        final bgColor = isDark
-            ? const Color(0xFF09090C)
-            : const Color(0xFFF2F2F7);
         final logoBg = isDark
             ? const Color(0xFF16161C)
             : const Color(0xFFFFFFFF);

@@ -105,12 +105,12 @@ class RemoteConfigService {
     final rc = _rc ?? FirebaseRemoteConfig.instance;
     final cleanCode = cityCode.trim().toLowerCase();
 
-    // Check key formats: `stations-del`, `stations-noi`, `stations-del.json`, etc.
+    // Primary key format: `stations_{code}` (e.g. stations_del, stations_mum, stations_blr)
     final keysToTry = [
       'stations_$cleanCode',
       'stations_$cleanCode.json',
-      'stations_$cleanCode',
       'metro_stations_$cleanCode',
+      'stations-$cleanCode',
     ];
 
     for (final key in keysToTry) {
