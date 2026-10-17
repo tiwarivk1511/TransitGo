@@ -7,6 +7,7 @@ import 'core/theme/theme_controller.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/startup_error_screen.dart';
 import 'services/analytics_service.dart';
+import 'services/wake_me_up_service.dart';
 
 class TransitGoApp extends StatelessWidget {
   final String? startupError;
@@ -22,6 +23,7 @@ class TransitGoApp extends StatelessWidget {
       ]),
       builder: (context, _) {
         return MaterialApp(
+          navigatorKey: WakeMeUpService.navigatorKey,
           locale: LanguageController.instance.currentLocale,
           title: 'TransitGo',
           debugShowCheckedModeBanner: false,

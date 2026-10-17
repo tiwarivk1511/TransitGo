@@ -12,8 +12,16 @@ import 'station_source.dart';
 class RailRadarSource {
   static const Map<String, String> _openWebHeaders = {
     'User-Agent':
-        'Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
+        'Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Edg/155.0.0.0 Mobile Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+    'Content-Type': 'application/json',
+    'Referer': 'https://railradar.in/railradar',
+    'dnt': '1',
+    'sec-ch-ua-platform': '"Android"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
   };
 
   static const Duration _timeout = Duration(seconds: 15);
@@ -46,9 +54,17 @@ class RailRadarSource {
   // 1. TRAIN AUTOCOMPLETE SEARCH (Open Web - No Key Needed)
   // ═══════════════════════════════════════════════════════════════════
   static Future<Map<String, dynamic>> _fetchSingleTrainName(String no) async {
+    final cleanNo = no.trim().split(' - ').first;
+    if (cleanNo.isEmpty) return {'number': no, 'name': 'Train $no', 'source': '', 'destination': ''};
+
     try {
-      final uri = Uri.parse('https://railradar.in/app/v1/trains/$no/live');
-      final res = await http.get(uri, headers: _openWebHeaders).timeout(const Duration(seconds: 4));
+      final uri = Uri.parse(
+        'https://railradar.in/app/v1/trains/$cleanNo/live?geometry=true&format=polyline&includeCoordinates=true',
+      );
+      final headers = Map<String, String>.from(_openWebHeaders);
+      headers['Referer'] = 'https://railradar.in/train-status/$cleanNo';
+
+      final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 8));
 
       if (res.statusCode == 200) {
         final body = json.decode(res.body);
@@ -57,33 +73,40 @@ class RailRadarSource {
           final trainObj = d['train'] is Map
               ? Map<String, dynamic>.from(d['train'] as Map)
               : <String, dynamic>{};
-          final name =
-          (d['trainName'] ?? trainObj['name'] ?? 'Train $no').toString().trim();
-          final src = (trainObj['source'] is Map
-              ? trainObj['source']['name'] ?? trainObj['source']['code']
-              : '')
-              .toString();
-          final dst = (trainObj['destination'] is Map
-              ? trainObj['destination']['name'] ?? trainObj['destination']['code']
-              : '')
-              .toString();
 
-          return {
-            'number': no,
-            'name': name.isNotEmpty ? name : 'Train $no',
-            'source': src,
-            'destination': dst,
-          };
+          final realName = (d['trainName'] ?? trainObj['name'] ?? d['name'] ?? '').toString().trim();
+
+          final srcObj = trainObj['source'];
+          final dstObj = trainObj['destination'];
+
+          String src = '';
+          if (srcObj is Map) {
+            src = (srcObj['name'] ?? srcObj['code'] ?? '').toString().trim();
+          }
+          String dst = '';
+          if (dstObj is Map) {
+            dst = (dstObj['name'] ?? dstObj['code'] ?? '').toString().trim();
+          }
+
+          if (realName.isNotEmpty && !realName.startsWith('Train ')) {
+            return {
+              'number': cleanNo,
+              'name': realName,
+              'source': src,
+              'destination': dst,
+            };
+          }
         }
       }
     } catch (_) {}
-    return {'number': no, 'name': 'Train $no', 'source': '', 'destination': ''};
+
+    return {'number': cleanNo, 'name': 'Train $cleanNo', 'source': '', 'destination': ''};
   }
 
   static Future<List<Map<String, dynamic>>> searchTrains(
-      String query, {
-        int limit = 10,
-      }) async {
+    String query, {
+    int limit = 10,
+  }) async {
     final q = query.trim();
     if (q.isEmpty) return [];
 
@@ -92,7 +115,7 @@ class RailRadarSource {
 
     // 1. Open Web Direct Digits Lookup
     final digits = q.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 3) {
+    if (digits.length >= 2) {
       final single = await _fetchSingleTrainName(digits);
       if (single['name'] != null && single['name'] != 'Train $digits') {
         final no = single['number']?.toString() ?? digits;
@@ -136,10 +159,10 @@ class RailRadarSource {
   // 2. STATION AUTOCOMPLETE SEARCH (Offline Station Database Catalog)
   // ═══════════════════════════════════════════════════════════════════
   static Future<List<Map<String, dynamic>>> searchStations(
-      String query, {
-        int limit = 10,
-        int offset = 0,
-      }) async {
+    String query, {
+    int limit = 10,
+    int offset = 0,
+  }) async {
     final q = query.trim();
     if (q.isEmpty) return [];
 
@@ -158,7 +181,8 @@ class RailRadarSource {
 
     // 1. Primary Direct GET Request
     try {
-      final res = await http.get(primaryUri, headers: _openWebHeaders).timeout(t);
+      final headers = Map<String, String>.from(_openWebHeaders);
+      final res = await http.get(primaryUri, headers: headers).timeout(t);
       if (res.statusCode == 200) {
         return json.decode(res.body);
       }
@@ -198,6 +222,28 @@ class RailRadarSource {
       '&includeCoordinates=true'
       '&haltsOnly=false',
     );
+
+    // Direct HTTP call with custom headers matching web browser
+    try {
+      final headers = Map<String, String>.from(_openWebHeaders);
+      headers['Referer'] = 'https://railradar.in/train-status/$cleanNo';
+
+      final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        Map<String, dynamic>? map;
+        if (body is Map && body['success'] == true && body['data'] is Map) {
+          map = Map<String, dynamic>.from(body['data'] as Map);
+        } else if (body is Map && body['data'] is Map) {
+          map = Map<String, dynamic>.from(body['data'] as Map);
+        }
+
+        if (map != null) {
+          unawaited(OfflineCache.put(cacheKey, map, ttl: const Duration(minutes: 10)));
+          return map;
+        }
+      }
+    } catch (_) {}
 
     final body = await _getJsonWithCorsFallback(uri);
     if (body != null) {

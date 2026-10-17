@@ -130,7 +130,12 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
     setState(() => _loadingCrossings = true);
     try {
       final res = await RailRadarSource.trainCrossings(widget.trainNumber);
-      final list = res.map((json) => TrainCrossing.fromJson(json)).toList();
+      var list = res.map((json) => TrainCrossing.fromJson(json)).toList();
+
+      if (list.isEmpty && _data != null && _data!.route.isNotEmpty) {
+        list = await _generateRouteCrossings(_data!);
+      }
+
       if (!mounted) return;
       setState(() {
         _crossings = list;
@@ -138,8 +143,115 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
       });
     } catch (_) {
       if (!mounted) return;
+      if (_data != null && _data!.route.isNotEmpty) {
+        final list = await _generateRouteCrossings(_data!);
+        if (mounted) {
+          setState(() {
+            _crossings = list;
+            _loadingCrossings = false;
+          });
+          return;
+        }
+      }
       setState(() => _loadingCrossings = false);
     }
+  }
+
+  Future<List<TrainCrossing>> _generateRouteCrossings(TrainTracking data) async {
+    final crossings = <TrainCrossing>[];
+    final route = data.route;
+    if (route.isEmpty) return crossings;
+
+    final userTrainNo = data.trainNumber.trim().split(' - ').first;
+
+    // Create station lookup map along user train route
+    final routeStationCodes = <String, TrainRouteStop>{};
+    final routeStationOrder = <String, int>{};
+    for (var i = 0; i < route.length; i++) {
+      final stop = route[i];
+      final code = stop.stationCode.trim().toUpperCase();
+      if (code.isNotEmpty) {
+        routeStationCodes[code] = stop;
+        routeStationOrder[code] = i;
+      }
+    }
+
+    // Fetch National Live Map Radar Array (2,400+ Active Live Trains)
+    final liveMapList = await RailRadarSource.liveMap();
+    if (liveMapList == null || liveMapList.isEmpty) return crossings;
+
+    final seenTrainNumbers = <String>{userTrainNo};
+
+    for (final item in liveMapList) {
+      String trainNo = '';
+      String st1 = '';
+      String st2 = '';
+      int delay = 0;
+      bool isOpposite = false;
+
+      if (item is List && item.isNotEmpty) {
+        trainNo = item[0]?.toString().trim() ?? '';
+        st1 = item.length > 9 ? item[9]?.toString().trim().toUpperCase() ?? '' : '';
+        st2 = item.length > 11 ? item[11]?.toString().trim().toUpperCase() ?? '' : '';
+        delay = item.length > 6
+            ? (item[6] is num ? (item[6] as num).toInt() : int.tryParse(item[6].toString()) ?? 0)
+            : 0;
+        final dirVal = item.length > 13 ? item[13] : (item.length > 8 ? item[8] : 1);
+        isOpposite = dirVal == 0 || dirVal == '0';
+      } else if (item is Map) {
+        trainNo = (item['trainNumber'] ?? item['number'] ?? '').toString().trim();
+        st1 = (item['stationCode'] ?? item['code'] ?? '').toString().trim().toUpperCase();
+        st2 = (item['nextStationCode'] ?? '').toString().trim().toUpperCase();
+        delay = (item['delayMinutes'] ?? item['delay'] ?? 0) is num
+            ? (item['delayMinutes'] ?? item['delay'] ?? 0).toInt()
+            : int.tryParse((item['delayMinutes'] ?? item['delay'] ?? '0').toString()) ?? 0;
+        isOpposite = item['isOpposite'] == true || item['type'] == 'CROSSING';
+      }
+
+      if (trainNo.isEmpty || trainNo == userTrainNo || !seenTrainNumbers.add(trainNo)) {
+        continue;
+      }
+
+      // Check if this live train is at or near any station along our route
+      String? matchedCode;
+      if (st1.isNotEmpty && routeStationCodes.containsKey(st1)) {
+        matchedCode = st1;
+      } else if (st2.isNotEmpty && routeStationCodes.containsKey(st2)) {
+        matchedCode = st2;
+      }
+
+      if (matchedCode == null) continue;
+
+      final stop = routeStationCodes[matchedCode]!;
+      final timeStr = TrainRouteStop.formatHm(stop.effectiveArrival) ??
+          TrainRouteStop.formatHm(stop.scheduledArrival) ??
+          stop.arrival ??
+          '--:--';
+
+      crossings.add(
+        TrainCrossing(
+          trainNumber: trainNo,
+          trainName: 'Train $trainNo', // Dynamic async name resolution in TrainCrossingTile
+          trainType: 'Express',
+          locationName: stop.stationName,
+          locationCode: matchedCode,
+          time: timeStr,
+          type: isOpposite ? 'CROSSING' : 'OVERTAKE',
+          delayMinutes: delay,
+          isUserTrain: false,
+          isOpposite: isOpposite,
+        ),
+      );
+    }
+
+    // Sort live crossings in order of station sequence along the route
+    crossings.sort((a, b) {
+      final idxA = routeStationOrder[a.locationCode.toUpperCase()] ?? 999;
+      final idxB = routeStationOrder[b.locationCode.toUpperCase()] ?? 999;
+      return idxA.compareTo(idxB);
+    });
+
+    return crossings;
   }
 
   void _subscribe() {
@@ -2157,6 +2269,7 @@ class _WakeMeUpBottomSheetState extends State<_WakeMeUpBottomSheet> {
             onSelectStation: (stop) {
               WakeMeUpService.arm(
                 trainNumber: widget.data.trainNumber,
+                trainName: widget.data.trainName,
                 targetStationCode: stop.stationCode,
                 targetStationName: stop.stationName,
                 minutesAhead: _selectedMinutesAhead,
@@ -2245,6 +2358,7 @@ class _WakeMeUpBottomSheetState extends State<_WakeMeUpBottomSheet> {
           onPressed: () {
             WakeMeUpService.arm(
               trainNumber: widget.data.trainNumber,
+              trainName: widget.data.trainName,
               targetStationCode: s.stationCode,
               targetStationName: s.stationName,
               minutesAhead: _selectedMinutesAhead,

@@ -4,8 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/theme_controller.dart';
 import '../../data/models/train.dart';
-import '../../services/translation_service.dart';
+import '../../data/sources/railradar_source.dart';
 import '../../screens/train_details/train_details_screen.dart';
+import '../../services/translation_service.dart';
 
 class TrainCrossing {
   final String trainNumber;
@@ -314,13 +315,31 @@ class TrainCrossingView extends StatelessWidget {
           children: [
             Expanded(
               child: Column(
-                children: sameDir.map((c) => _trainCardItem(context, c, isDark, cardBg, textPrimary, textSecondary, borderCol)).toList(),
+                children: sameDir
+                    .map((c) => _CrossingTrainCardTile(
+                          crossing: c,
+                          isDark: isDark,
+                          cardBg: cardBg,
+                          textPrimary: textPrimary,
+                          textSecondary: textSecondary,
+                          borderCol: borderCol,
+                        ))
+                    .toList(),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
-                children: oppositeDir.map((c) => _trainCardItem(context, c, isDark, cardBg, textPrimary, textSecondary, borderCol)).toList(),
+                children: oppositeDir
+                    .map((c) => _CrossingTrainCardTile(
+                          crossing: c,
+                          isDark: isDark,
+                          cardBg: cardBg,
+                          textPrimary: textPrimary,
+                          textSecondary: textSecondary,
+                          borderCol: borderCol,
+                        ))
+                    .toList(),
               ),
             ),
           ],
@@ -329,20 +348,179 @@ class TrainCrossingView extends StatelessWidget {
       ],
     );
   }
+}
 
-  Widget _trainCardItem(
-    BuildContext context,
-    TrainCrossing c,
-    bool isDark,
-    Color cardBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
+class _CrossingTrainCardTile extends StatefulWidget {
+  final TrainCrossing crossing;
+  final bool isDark;
+  final Color cardBg;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color borderCol;
+
+  const _CrossingTrainCardTile({
+    required this.crossing,
+    required this.isDark,
+    required this.cardBg,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.borderCol,
+  });
+
+  @override
+  State<_CrossingTrainCardTile> createState() => _CrossingTrainCardTileState();
+}
+
+class _CrossingTrainCardTileState extends State<_CrossingTrainCardTile> {
+  static final Map<String, ({String name, String status})> _crossingCache = {};
+  static final Map<String, String> _crossingNameCache = {};
+
+  String? _displayName;
+  String? _liveStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAndFetch();
+  }
+
+  @override
+  void didUpdateWidget(_CrossingTrainCardTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _checkAndFetch();
+  }
+
+  void _checkAndFetch() {
+    final c = widget.crossing;
+    final num = c.trainNumber.trim();
+    if (num.isEmpty) return;
+
+    // 1. Check Full Cache (Name + Live Status)
+    if (_crossingCache.containsKey(num)) {
+      final cached = _crossingCache[num]!;
+      if (mounted) {
+        setState(() {
+          _displayName = cached.name;
+          _liveStatus = cached.status;
+        });
+      }
+      return;
+    }
+
+    // 2. Check Name Cache or Initial Train Name
+    if (_crossingNameCache.containsKey(num)) {
+      _displayName = _crossingNameCache[num];
+    } else if (c.trainName.isNotEmpty && !c.trainName.startsWith('Train ')) {
+      _displayName = c.trainName;
+      _crossingNameCache[num] = c.trainName;
+    } else {
+      _displayName = 'Train $num';
+      // Fast fetch train name asynchronously
+      RailRadarSource.fetchSingleTrainName(num).then((info) {
+        final fastName = info['name']?.toString().trim();
+        if (fastName != null && fastName.isNotEmpty && !fastName.startsWith('Train ') && mounted) {
+          _crossingNameCache[num] = fastName;
+          setState(() => _displayName = fastName);
+        }
+      }).catchError((_) {});
+    }
+
+    // 3. Staggered Live Tracking Fetch to avoid concurrent API rate-limiting
+    final hashOffset = (num.hashCode.abs() % 10) * 50;
+    Future.delayed(Duration(milliseconds: hashOffset), () async {
+      if (!mounted) return;
+      await _fetchLiveTracking(num, c.trainName);
+    });
+  }
+
+  Future<void> _fetchLiveTracking(String num, String initialName) async {
+    try {
+      final data = await RailRadarSource.liveTracking(num, includeGeometry: false);
+      if (!mounted) return;
+
+      if (data != null) {
+        final realName = (data['trainName'] ??
+                (data['train'] is Map ? data['train']['name'] : null) ??
+                '')
+            .toString()
+            .trim();
+
+        if (realName.isNotEmpty && !realName.startsWith('Train ')) {
+          _crossingNameCache[num] = realName;
+        }
+
+        String statusText = '';
+        if (data['currentLocation'] is Map) {
+          final loc = Map<String, dynamic>.from(data['currentLocation'] as Map);
+          final stName = (loc['stationName'] ?? loc['stationCode'] ?? '').toString().trim();
+          final delay = loc['delayMinutes'] ?? data['delayMinutes'] ?? 0;
+          final status = (loc['status'] ?? '').toString().trim();
+
+          if (stName.isNotEmpty) {
+            final delayStr = delay > 0 ? ' ($delay m late)' : ' (On Time)';
+            if (status.toLowerCase().contains('departed')) {
+              statusText = 'Departed $stName$delayStr';
+            } else if (status.toLowerCase().contains('arrived') || status.toLowerCase().contains('halt')) {
+              statusText = 'Halted at $stName$delayStr';
+            } else {
+              statusText = 'At $stName$delayStr';
+            }
+          }
+        }
+
+        if (statusText.isEmpty && data['previousHalt'] is Map) {
+          final prev = Map<String, dynamic>.from(data['previousHalt'] as Map);
+          final prevName = (prev['stationName'] ?? prev['stationCode'] ?? '').toString().trim();
+          final delay = data['delayMinutes'] ?? 0;
+          if (prevName.isNotEmpty) {
+            statusText = 'Passed $prevName${delay > 0 ? " ($delay m late)" : ""}';
+          }
+        }
+
+        if (statusText.isEmpty && data['nextHalt'] is Map) {
+          final next = Map<String, dynamic>.from(data['nextHalt'] as Map);
+          final nextName = (next['stationName'] ?? next['stationCode'] ?? '').toString().trim();
+          final delay = data['delayMinutes'] ?? 0;
+          if (nextName.isNotEmpty) {
+            statusText = 'En Route to $nextName${delay > 0 ? " ($delay m late)" : ""}';
+          }
+        }
+
+        final resolvedName = _crossingNameCache[num] ??
+            ((realName.isNotEmpty && !realName.startsWith('Train '))
+                ? realName
+                : (initialName.isNotEmpty && !initialName.startsWith('Train ') ? initialName : 'Train $num'));
+
+        _crossingCache[num] = (name: resolvedName, status: statusText);
+
+        if (mounted) {
+          setState(() {
+            _displayName = resolvedName;
+            if (statusText.isNotEmpty) _liveStatus = statusText;
+          });
+        }
+      } else {
+        // Fallback: fetch single train name if live tracking returned null
+        final info = await RailRadarSource.fetchSingleTrainName(num);
+        final fallbackName = info['name']?.toString().trim();
+        if (fallbackName != null && fallbackName.isNotEmpty && !fallbackName.startsWith('Train ') && mounted) {
+          _crossingNameCache[num] = fallbackName;
+          _crossingCache[num] = (name: fallbackName, status: _liveStatus ?? '');
+          setState(() => _displayName = fallbackName);
+        }
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.crossing;
     final isUser = c.isUserTrain;
     final color = isUser
         ? const Color(0xFF0A84FF)
         : (c.isOpposite ? const Color(0xFF30D158) : const Color(0xFFFF9F0A));
+
+    final nameText = _displayName ?? (c.trainName.isNotEmpty ? c.trainName : 'Train ${c.trainNumber}');
 
     return GestureDetector(
       onTap: () {
@@ -352,7 +530,7 @@ class TrainCrossingView extends StatelessWidget {
           MaterialPageRoute(
             builder: (_) => TrainDetailsScreen(
               trainNumber: c.trainNumber,
-              trainName: c.trainName,
+              trainName: nameText,
             ),
           ),
         );
@@ -361,10 +539,10 @@ class TrainCrossingView extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isUser ? color.withValues(alpha: 0.15) : cardBg,
+          color: isUser ? color.withValues(alpha: 0.15) : widget.cardBg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isUser ? color : borderCol,
+            color: isUser ? color : widget.borderCol,
             width: isUser ? 1.5 : 1,
           ),
         ),
@@ -387,17 +565,42 @@ class TrainCrossingView extends StatelessWidget {
                 const Spacer(),
                 Text(
                   c.time,
-                  style: GoogleFonts.inter(color: textSecondary, fontSize: 9.5, fontWeight: FontWeight.bold),
+                  style: GoogleFonts.inter(color: widget.textSecondary, fontSize: 9.5, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              c.trainName.tr,
+              nameText,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.inter(color: textPrimary, fontWeight: FontWeight.w800, fontSize: 11.5),
+              style: GoogleFonts.inter(color: widget.textPrimary, fontWeight: FontWeight.w800, fontSize: 11.5),
             ),
+            if (_liveStatus != null && _liveStatus!.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      _liveStatus!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        color: color,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

@@ -139,9 +139,45 @@ class _TrainMapScreenState extends State<TrainMapScreen>
   }
 
   LatLng? _trainLatLng(TrainTracking data) {
-    final current = data.currentLocation;
-    if (current.hasGpsCoordinates) {
-      return current.latLng;
+    final location = data.currentLocation;
+
+    // Check if train status or location indicates train is currently at a station
+    final isAtStation = location.isHalt ||
+        location.status.toLowerCase().contains('at-station') ||
+        location.status.toLowerCase().contains('at ') ||
+        location.status.toLowerCase().contains('halt');
+
+    final code = location.stationCode.trim().toUpperCase();
+    final name = location.stationName.trim().toLowerCase();
+
+    // Find current station object in train route
+    TrainRouteStop? currentStop;
+    if (location.sequence > 0) {
+      final idx = data.route.indexWhere((s) => s.sequence == location.sequence);
+      if (idx >= 0) currentStop = data.route[idx];
+    }
+    if (currentStop == null && code.isNotEmpty) {
+      final idx = data.route.indexWhere((s) => s.stationCode.toUpperCase() == code);
+      if (idx >= 0) currentStop = data.route[idx];
+    }
+    if (currentStop == null && name.isNotEmpty) {
+      final idx = data.route.indexWhere((s) => s.stationName.toLowerCase() == name);
+      if (idx >= 0) currentStop = data.route[idx];
+    }
+    if (currentStop == null && data.currentIndex >= 0 && data.currentIndex < data.route.length) {
+      currentStop = data.route[data.currentIndex];
+    }
+
+    final currentStationPos = currentStop != null ? _positionForStop(data, currentStop) : null;
+
+    // If train is AT a station or very close (distance from last station <= 0.3 km), FORCE exact station position
+    final distFromLast = location.distanceFromLastStationKm;
+    if (currentStationPos != null && (isAtStation || (distFromLast != null && distFromLast <= 0.3))) {
+      return currentStationPos;
+    }
+
+    if (location.hasGpsCoordinates) {
+      return location.latLng;
     }
 
     final fromSegment = _positionFromCurrentSegment(data);
@@ -152,6 +188,8 @@ class _TrainMapScreenState extends State<TrainMapScreen>
 
     final fromProgress = _positionFromProgress(data);
     if (fromProgress != null) return fromProgress;
+
+    if (currentStationPos != null) return currentStationPos;
 
     if (data.routeGeometry.isNotEmpty) {
       final fraction = data.progressFraction.clamp(0.0, 1.0);
@@ -271,7 +309,9 @@ class _TrainMapScreenState extends State<TrainMapScreen>
       if (geoStop.latLng == null) continue;
       if ((stop.sequence > 0 && geoStop.sequence == stop.sequence) ||
           (stop.stationCode.isNotEmpty &&
-              geoStop.code.toUpperCase() == stop.stationCode.toUpperCase())) {
+              geoStop.code.toUpperCase() == stop.stationCode.toUpperCase()) ||
+          (stop.stationName.isNotEmpty &&
+              geoStop.name.toLowerCase() == stop.stationName.toLowerCase())) {
         return geoStop.latLng;
       }
     }
@@ -1052,7 +1092,7 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             point: pos,
             width: 140,
             height: 70,
-            alignment: Alignment.topCenter,
+            alignment: Alignment.center,
             child: _CurrentStationMarker(
               stationCode: stop.stationCode,
               stationName: stop.stationName,
@@ -1195,80 +1235,77 @@ class _CurrentStationMarkerState extends State<_CurrentStationMarker>
     return AnimatedBuilder(
       animation: _pulseController,
       builder: (context, child) {
-        final glowScale = 1.0 + (_pulseController.value * 0.28);
+        final glowScale = 1.0 + (_pulseController.value * 0.35);
         final glowAlpha = (0.8 - _pulseController.value * 0.4).clamp(0.2, 0.8);
 
-        return Column(
-          mainAxisSize: MainAxisSize.min,
+        return Stack(
+          alignment: Alignment.center,
           children: [
-            // Prominent Glowing Current Station Badge
+            // Outer Pulsing Glow Aura Ring centered on station coordinates
+            Transform.scale(
+              scale: glowScale,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF9F0A).withValues(alpha: glowAlpha),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            // Station Dot Ring
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              width: 16,
+              height: 16,
               decoration: BoxDecoration(
                 color: const Color(0xFFFF9F0A),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFFF9F0A).withValues(alpha: 0.6),
-                    blurRadius: 10 * _pulseController.value + 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: const BoxDecoration(
-                      color: Colors.black,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    '📍 ${widget.stationCode}${widget.platform != null && widget.platform!.isNotEmpty ? " (P${widget.platform})" : ""}',
-                    style: GoogleFonts.inter(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 11,
-                    ),
-                  ),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black45, blurRadius: 6),
                 ],
               ),
             ),
-            const SizedBox(height: 4),
-
-            // Pulsing Live Station Point Dot
-            Stack(
-              alignment: Alignment.center,
-              children: [
-                Transform.scale(
-                  scale: glowScale,
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF9F0A).withValues(alpha: glowAlpha),
-                      shape: BoxShape.circle,
+            // Floating Station Name Tag directly above the dot
+            Positioned(
+              bottom: 30,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF9F0A),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black38,
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
                     ),
-                  ),
+                  ],
                 ),
-                Container(
-                  width: 14,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF9F0A),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: const [
-                      BoxShadow(color: Colors.black45, blurRadius: 4),
-                    ],
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Colors.black,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '📍 ${widget.stationCode}${widget.platform != null && widget.platform!.isNotEmpty ? " • P${widget.platform}" : ""}',
+                      style: GoogleFonts.inter(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ],
         );
