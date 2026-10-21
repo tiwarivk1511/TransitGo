@@ -144,7 +144,6 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     with WidgetsBindingObserver {
   final _mapController = MapController();
   final _searchCtrl = TextEditingController();
-  String _searchQuery = '';
 
   List<LiveMapTrain> _allTrains = [];
   LiveMapTrain? _selectedTrain;
@@ -343,6 +342,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       final details = await RailRadarSource.liveTracking(
         train.number,
         includeGeometry: true,
+        date: '',
       );
 
       if (!mounted) return;
@@ -926,7 +926,6 @@ class _ScheduleScreenState extends State<ScheduleScreen>
             icon: CupertinoIcons.search,
             onTrainSelected: (selectedTrainMap) {
               final trainNo = selectedTrainMap['number'] ?? '';
-              setState(() => _searchQuery = trainNo);
               final match = _allTrains.where((t) => t.number == trainNo.trim()).firstOrNull;
               if (match != null) {
                 _onTrainTapped(match);

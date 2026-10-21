@@ -149,7 +149,6 @@ class _StationInfoScreenState extends State<StationInfoScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = ThemeController.instance.isDarkMode;
-    final bgColor = isDark ? const Color(0xFF030305) : const Color(0xFFF2F2F7);
     final cardBg = isDark ? const Color(0xFF101320) : const Color(0xFFFFFFFF);
     final textPrimary = isDark ? Colors.white : const Color(0xFF1C1C1E);
     final textSecondary = isDark ? const Color(0xFF98989D) : const Color(0xFF636366);

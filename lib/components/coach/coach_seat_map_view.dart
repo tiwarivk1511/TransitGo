@@ -369,11 +369,6 @@ class _CoachSeatMapViewState extends State<CoachSeatMapView> {
 
   static List _asList(dynamic value) => value is List ? value : const [];
 
-  static int? _toInt(dynamic value) {
-    if (value is num) return value.toInt();
-    return int.tryParse(value?.toString() ?? '');
-  }
-
   Widget _legendDot(Color color, String label, Color textSecondary) {
     return Row(
       mainAxisSize: MainAxisSize.min,

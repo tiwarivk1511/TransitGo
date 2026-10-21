@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:firebase_core/firebase_core.dart';
@@ -18,6 +19,7 @@ import 'firebase_options.dart';
 import 'services/analytics_service.dart';
 import 'services/crashlytics_service.dart';
 import 'services/remote_config_service.dart';
+import 'services/train_catalog_service.dart';
 import 'services/wake_me_up_service.dart';
 
 /// Populated during startup if the API key couldn't be resolved.
@@ -119,6 +121,11 @@ Future<void> main() async {
       debugPrint('[startup] Notification/location permission setup failed: $e');
     }),
   ]);
+
+  // Non-blocking background pre-fetch
+  TrainCatalogService.initCatalog().catchError((e) {
+    debugPrint('[startup] TrainCatalogService.initCatalog failed: $e');
+  });
 
   // ─────────────────────────────────────────────────────────────
   // 6. System UI.

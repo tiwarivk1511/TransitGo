@@ -3,7 +3,6 @@ import 'dart:core';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../components/common/modern_background.dart';
 import '../../../core/theme/theme_controller.dart';
@@ -31,8 +30,14 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
   Timer? _autoSyncTimer;
 
   String? _sourceStation;
+  String? _sourceSlug;
   String? _destinationStation;
+  String? _destinationSlug;
+
   List<MetroRoute> _calculatedRoutes = [];
+
+  bool _isCalculatingRoute = false;
+  String? _routeError;
   int _selectedRouteIndex = 0;
 
   final _searchCtrl = TextEditingController();
@@ -77,15 +82,12 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
       setState(() => _isSyncingWebData = true);
     }
     try {
-      // 1. Force refresh Firebase Remote Config parameters from server
       await RemoteConfigService.refresh();
 
-      // 2. Sync selected city network
       final liveNet = await MetroApiService.fetchDynamicTrackMyMetroNetwork(
         _selectedNetwork,
       );
 
-      // 3. Background pre-fetch & cache ALL cities metro stations from Remote Config
       unawaited(MetroApiService.syncAllCitiesMetroStations());
 
       if (mounted) {
@@ -112,8 +114,43 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
 
   void _calculateRoute() async {
     if (_sourceStation == null || _destinationStation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _sourceStation == null && _destinationStation == null
+                ? 'Please select both start and destination stations.'
+                : (_sourceStation == null
+                    ? 'Please select a start station (From).'
+                    : 'Please select a destination station (To).'),
+            style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: const Color(0xFFFF375F),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
       return;
     }
+
+    if (_sourceStation == _destinationStation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Start and destination station cannot be the same.',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: const Color(0xFFFF9F0A),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isCalculatingRoute = true;
+      _routeError = null;
+    });
 
     AnalyticsService.logMetroSearch(
       cityName: _selectedNetwork.cityName,
@@ -122,22 +159,23 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     );
 
     try {
-      // 1. Fetch 100% live routes directly from YoMetro Open Web API: ...
       final yoRoutes = await MetroApiService.fetchYoMetroApiRoutes(
         network: _selectedNetwork,
         sourceStation: _sourceStation!,
         destinationStation: _destinationStation!,
+        sourceSlug: _sourceSlug,
+        destinationSlug: _destinationSlug,
       );
 
       if (yoRoutes.isNotEmpty && mounted) {
         setState(() {
           _calculatedRoutes = yoRoutes;
           _selectedRouteIndex = 0;
+          _isCalculatingRoute = false;
         });
         return;
       }
 
-      // 2. Fallback: Graph BFS route calculation
       final routes = MetroRouteCalculator.findRoutes(
         _selectedNetwork,
         _sourceStation!,
@@ -148,6 +186,11 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
         setState(() {
           _calculatedRoutes = routes;
           _selectedRouteIndex = 0;
+          _isCalculatingRoute = false;
+          if (routes.isEmpty) {
+            _routeError =
+                'No direct or connecting route found between $_sourceStation and $_destinationStation.';
+          }
         });
       }
     } catch (e) {
@@ -156,6 +199,9 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
         setState(() {
           _calculatedRoutes = [];
           _selectedRouteIndex = 0;
+          _isCalculatingRoute = false;
+          _routeError =
+              'Unable to calculate route. Please check network connection.';
         });
       }
     }
@@ -163,9 +209,12 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
 
   void _swapStations() {
     setState(() {
-      final temp = _sourceStation;
+      final tempSt = _sourceStation;
+      final tempSl = _sourceSlug;
       _sourceStation = _destinationStation;
-      _destinationStation = temp;
+      _sourceSlug = _destinationSlug;
+      _destinationStation = tempSt;
+      _destinationSlug = tempSl;
       if (_sourceStation != null && _destinationStation != null) {
         _calculateRoute();
       }
@@ -205,13 +254,6 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     return ['All', ...cities];
   }
 
-  Future<void> _openUrl(String? urlString) async {
-    if (urlString == null) return;
-    final uri = Uri.tryParse(urlString);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
   void _openStationPicker({required bool isSource}) async {
     final isDark = ThemeController.instance.isDarkMode;
     final cardBg = isDark ? const Color(0xFF16161C) : const Color(0xFFFFFFFF);
@@ -222,31 +264,70 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
         : const Color(0xFFE5E5EA);
     final inputBg = isDark ? const Color(0xFF09090C) : const Color(0xFFF2F2F7);
 
-    // Fetch dynamic live stations list from TrackMyMetro REST API (stations-{cityCode}.json)
-    List<String> stations = [];
-    final cityCode =
-        MetroApiService.trackMyMetroCityCodes[_selectedNetwork.id
-            .toLowerCase()] ??
-        'del';
-    final trackMyStns = await MetroApiService.fetchTrackMyMetroStations(
-      cityCode,
-    );
+    final zoneId = MetroApiService.yoMetroZoneIds[_selectedNetwork.id.toLowerCase()];
+    List<Map<String, String>> stationItems = [];
 
-    if (trackMyStns.isNotEmpty) {
-      final set = <String>{};
+    if (zoneId != null) {
+      final yoStns = await MetroApiService.fetchYoMetroStations(zoneId);
+      for (final item in yoStns) {
+        final name = (item['name'] ?? '').toString().trim();
+        final slug = (item['slug'] ?? '').toString().trim();
+        if (name.isNotEmpty) {
+          stationItems.add({
+            'name': name,
+            'slug': slug.isNotEmpty
+                ? slug
+                : MetroApiService.formatYoMetroStationSlug(
+                    name,
+                    _selectedNetwork.cityName,
+                  ),
+          });
+        }
+      }
+    }
+
+    if (stationItems.isEmpty) {
+      final cityCode =
+          MetroApiService.trackMyMetroCityCodes[_selectedNetwork.id
+              .toLowerCase()] ??
+          'del';
+      final trackMyStns = await MetroApiService.fetchTrackMyMetroStations(
+        cityCode,
+      );
+
       for (final item in trackMyStns) {
         final name = (item['name'] ?? '').toString().trim();
-        if (name.isNotEmpty) set.add(name);
+        final slug = (item['slug'] ?? '').toString().trim();
+        if (name.isNotEmpty) {
+          stationItems.add({
+            'name': name,
+            'slug': slug.isNotEmpty
+                ? slug
+                : MetroApiService.formatYoMetroStationSlug(
+                    name,
+                    _selectedNetwork.cityName,
+                  ),
+          });
+        }
       }
-      stations = set.toList()..sort();
-    } else {
-      stations = _selectedNetwork.allStations;
+    }
+
+    if (stationItems.isEmpty) {
+      for (final name in _selectedNetwork.allStations) {
+        stationItems.add({
+          'name': name,
+          'slug': MetroApiService.formatYoMetroStationSlug(
+            name,
+            _selectedNetwork.cityName,
+          ),
+        });
+      }
     }
 
     String search = '';
     if (!mounted) return;
 
-    final selected = await showModalBottomSheet<String>(
+    final selectedItem = await showModalBottomSheet<Map<String, String>>(
       context: context,
       backgroundColor: cardBg,
       isScrollControlled: true,
@@ -256,8 +337,12 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final filtered = stations
-                .where((s) => s.toLowerCase().contains(search.toLowerCase()))
+            final filtered = stationItems
+                .where(
+                  (s) => s['name']!.toLowerCase().contains(
+                    search.toLowerCase(),
+                  ),
+                )
                 .toList();
 
             return Container(
@@ -341,13 +426,14 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                               separatorBuilder: (_, _) =>
                                   Divider(color: borderCol, height: 1),
                               itemBuilder: (ctx, idx) {
-                                final st = filtered[idx];
+                                final stObj = filtered[idx];
+                                final stName = stObj['name']!;
                                 final isSelected = isSource
-                                    ? st == _sourceStation
-                                    : st == _destinationStation;
+                                    ? stName == _sourceStation
+                                    : stName == _destinationStation;
 
                                 final passingLines = _selectedNetwork.lines
-                                    .where((l) => l.stations.contains(st))
+                                    .where((l) => l.stations.contains(stName))
                                     .toList();
 
                                 return ListTile(
@@ -381,7 +467,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                                     ),
                                   ),
                                   title: Text(
-                                    st,
+                                    stName,
                                     style: GoogleFonts.inter(
                                       color: isSelected
                                           ? const Color(0xFF0A84FF)
@@ -425,7 +511,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                                           size: 18,
                                         )
                                       : null,
-                                  onTap: () => Navigator.pop(ctx, st),
+                                  onTap: () => Navigator.pop(ctx, stObj),
                                 );
                               },
                             ),
@@ -439,12 +525,14 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
       },
     );
 
-    if (selected != null && mounted) {
+    if (selectedItem != null && mounted) {
       setState(() {
         if (isSource) {
-          _sourceStation = selected;
+          _sourceStation = selectedItem['name'];
+          _sourceSlug = selectedItem['slug'];
         } else {
-          _destinationStation = selected;
+          _destinationStation = selectedItem['name'];
+          _destinationSlug = selectedItem['slug'];
         }
       });
 
@@ -774,7 +862,9 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
               inputBg,
             ),
             const SizedBox(height: 18),
-            if (_calculatedRoutes.isNotEmpty)
+            if (_isCalculatingRoute)
+              _loadingRouteSkeleton(cardBg, borderCol)
+            else if (_calculatedRoutes.isNotEmpty)
               _routeResultCard(
                 _calculatedRoutes.first,
                 cardBg,
@@ -782,6 +872,14 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                 textSecondary,
                 borderCol,
                 inputBg,
+              )
+            else if (_routeError != null)
+              _errorRouteCard(
+                _routeError!,
+                cardBg,
+                textPrimary,
+                textSecondary,
+                borderCol,
               )
             else
               _routePlannerInstructions(
@@ -795,6 +893,86 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _loadingRouteSkeleton(Color cardBg, Color borderCol) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: borderCol),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFF0A84FF),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              'Finding optimal metro route & line transfers...',
+              style: GoogleFonts.inter(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _errorRouteCard(
+    String message,
+    Color cardBg,
+    Color textPrimary,
+    Color textSecondary,
+    Color borderCol,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: const Color(0xFFFF375F).withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF375F).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              CupertinoIcons.exclamationmark_triangle_fill,
+              color: Color(0xFFFF375F),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.inter(
+                color: textPrimary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -865,9 +1043,12 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                         setState(() {
                           _selectedNetwork = baseNet;
                           _sourceStation = null;
+                          _sourceSlug = null;
                           _destinationStation = null;
+                          _destinationSlug = null;
                           _calculatedRoutes = [];
                           _selectedRouteIndex = 0;
+                          _routeError = null;
                         });
                         _syncLiveWebData();
                       }
@@ -1054,14 +1235,25 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
-              onPressed: _calculateRoute,
-              icon: const Icon(
-                CupertinoIcons.alt,
-                color: Colors.white,
-                size: 16,
-              ),
+              onPressed: _isCalculatingRoute ? null : _calculateRoute,
+              icon: _isCalculatingRoute
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      CupertinoIcons.alt,
+                      color: Colors.white,
+                      size: 16,
+                    ),
               label: Text(
-                'SHOW METRO ROUTE & FARE',
+                _isCalculatingRoute
+                    ? 'CALCULATING ROUTE...'
+                    : 'SHOW METRO ROUTE & FARE',
                 style: GoogleFonts.inter(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
@@ -1178,62 +1370,53 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
 
           const SizedBox(height: 16),
 
+          // Journey Summary Grid (Fare, Time, Stations, Interchanges)
           Row(
             children: [
-              _metricBox(
-                'Travel Time',
-                '~${route.totalDurationMinutes} mins',
-                CupertinoIcons.clock_fill,
-                Colors.cyan,
-                inputBg,
-                textPrimary,
-                textSecondary,
-                borderCol,
+              Expanded(
+                child: _summaryStatPill(
+                  icon: CupertinoIcons.ticket_fill,
+                  label: 'EST. FARE',
+                  value: '₹${route.estimatedFare}',
+                  color: const Color(0xFF30D158),
+                  inputBg: inputBg,
+                  borderCol: borderCol,
+                ),
               ),
               const SizedBox(width: 8),
-              _metricBox(
-                'Est. Fare',
-                '₹${route.estimatedFare}',
-                CupertinoIcons.money_dollar_circle_fill,
-                const Color(0xFF30D158),
-                inputBg,
-                textPrimary,
-                textSecondary,
-                borderCol,
+              Expanded(
+                child: _summaryStatPill(
+                  icon: CupertinoIcons.clock_fill,
+                  label: 'TIME',
+                  value: '${route.totalDurationMinutes} min',
+                  color: const Color(0xFF0A84FF),
+                  inputBg: inputBg,
+                  borderCol: borderCol,
+                ),
               ),
               const SizedBox(width: 8),
-              _metricBox(
-                'Stations',
-                '${route.totalStations}',
-                CupertinoIcons.location_solid,
-                const Color(0xFFFFD60A),
-                inputBg,
-                textPrimary,
-                textSecondary,
-                borderCol,
+              Expanded(
+                child: _summaryStatPill(
+                  icon: CupertinoIcons.tram_fill,
+                  label: 'STATIONS',
+                  value: '${route.totalStations}',
+                  color: const Color(0xFFFF9F0A),
+                  inputBg: inputBg,
+                  borderCol: borderCol,
+                ),
               ),
               const SizedBox(width: 8),
-              _metricBox(
-                'Interchanges',
-                '${route.interchanges.length}',
-                CupertinoIcons.arrow_2_squarepath,
-                const Color(0xFF5E5CE6),
-                inputBg,
-                textPrimary,
-                textSecondary,
-                borderCol,
+              Expanded(
+                child: _summaryStatPill(
+                  icon: CupertinoIcons.arrow_2_squarepath,
+                  label: 'SWITCHES',
+                  value: '${route.interchanges.length}',
+                  color: const Color(0xFFBF5AF2),
+                  inputBg: inputBg,
+                  borderCol: borderCol,
+                ),
               ),
             ],
-          ),
-
-          const SizedBox(height: 16),
-
-          _liveTrainStatusCard(
-            route,
-            inputBg,
-            textPrimary,
-            textSecondary,
-            borderCol,
           ),
 
           const SizedBox(height: 20),
@@ -1241,388 +1424,253 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
           const SizedBox(height: 16),
 
           Text(
-            'Route Itinerary & Interchanges',
+            'STATION BY STATION JOURNEY ROUTE',
             style: GoogleFonts.inter(
-              color: textPrimary,
-              fontWeight: FontWeight.bold,
+              color: textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Render Route Segments
+          ...route.segments.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final seg = entry.value;
+            final isLast = idx == route.segments.length - 1;
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Line Segment Header Banner
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: seg.lineColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: seg.lineColor.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: seg.lineColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          seg.lineName,
+                          style: GoogleFonts.inter(
+                            color: seg.lineColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${seg.stations.length} Stops • ${seg.durationMinutes}m',
+                        style: GoogleFonts.inter(
+                          color: textSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // Station List on this Line
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Column(
+                    children: seg.stations.asMap().entries.map((stEntry) {
+                      final stIdx = stEntry.key;
+                      final stName = stEntry.value;
+                      final isFirstSt = stIdx == 0;
+                      final isLastSt = stIdx == seg.stations.length - 1;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: (isFirstSt || isLastSt)
+                                    ? seg.lineColor
+                                    : textSecondary.withValues(alpha: 0.3),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                stName,
+                                style: GoogleFonts.inter(
+                                  color: (isFirstSt || isLastSt)
+                                      ? textPrimary
+                                      : textSecondary,
+                                  fontWeight: (isFirstSt || isLastSt)
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
+                                  fontSize: (isFirstSt || isLastSt) ? 13 : 11.5,
+                                ),
+                              ),
+                            ),
+                            if (isFirstSt && idx == 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFF30D158,
+                                  ).withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'BOARD 🟢',
+                                  style: GoogleFonts.inter(
+                                    color: const Color(0xFF30D158),
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              )
+                            else if (isLastSt && isLast)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFFFF375F,
+                                  ).withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'EXIT 🏁',
+                                  style: GoogleFonts.inter(
+                                    color: const Color(0xFFFF375F),
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+
+                // Interchange Transfer Card
+                if (!isLast && idx < route.interchanges.length) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF9F0A).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: const Color(0xFFFF9F0A).withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          CupertinoIcons.arrow_2_squarepath,
+                          color: Color(0xFFFF9F0A),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'LINE INTERCHANGE AT ${route.interchanges[idx].stationName.toUpperCase()}',
+                                style: GoogleFonts.inter(
+                                  color: const Color(0xFFFF9F0A),
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Switch from ${route.interchanges[idx].fromLine} ➔ ${route.interchanges[idx].toLine}',
+                                style: GoogleFonts.inter(
+                                  color: textPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+              ],
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryStatPill({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    required Color inputBg,
+    required Color borderCol,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: inputBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderCol),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              color: color,
+              fontWeight: FontWeight.w900,
               fontSize: 13,
             ),
           ),
-          const SizedBox(height: 12),
-
-          ...route.segments.asMap().entries.expand((entry) {
-            final idx = entry.key;
-            final seg = entry.value;
-            final items = <Widget>[
-              _routeSegmentItem(
-                seg,
-                route,
-                inputBg,
-                textPrimary,
-                textSecondary,
-                borderCol,
-              ),
-            ];
-            if (idx < route.interchanges.length) {
-              items.add(
-                _interchangeCard(
-                  route.interchanges[idx],
-                  inputBg,
-                  textPrimary,
-                  textSecondary,
-                  borderCol,
-                ),
-              );
-            }
-            return items;
-          }),
-
-          const SizedBox(height: 12),
-
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                setState(() => _currentViewMode = 1);
-              },
-              icon: const Icon(
-                CupertinoIcons.map,
-                color: Color(0xFF0A84FF),
-                size: 16,
-              ),
-              label: Text(
-                'VIEW ROUTE ON GIS MAP',
-                style: GoogleFonts.inter(
-                  color: const Color(0xFF0A84FF),
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFF0A84FF)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: Colors.grey,
+              fontSize: 7.5,
+              fontWeight: FontWeight.w900,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _liveTrainStatusCard(
-    MetroRoute route,
-    Color inputBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    final now = DateTime.now();
-    final hour = now.hour;
-
-    final isPeakHour = (hour >= 8 && hour < 11) || (hour >= 17 && hour < 20);
-    final frequency = isPeakHour ? '2-3 mins' : '5-8 mins';
-    final nextTrainMins = isPeakHour
-        ? (now.minute % 3) + 1
-        : (now.minute % 6) + 2;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF30D158).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFF30D158).withValues(alpha: 0.25),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF30D158).withValues(alpha: 0.2),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              CupertinoIcons.tram_fill,
-              color: Color(0xFF30D158),
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF30D158),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(color: Color(0xFF30D158), blurRadius: 4),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Normal Service • Live Status',
-                      style: GoogleFonts.inter(
-                        color: const Color(0xFF30D158),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Next Train arriving in ~$nextTrainMins mins (Frequency: $frequency)',
-                  style: GoogleFonts.inter(color: textSecondary, fontSize: 10),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _metricBox(
-    String title,
-    String val,
-    IconData icon,
-    Color color,
-    Color inputBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: inputBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(height: 4),
-            Text(
-              val,
-              style: GoogleFonts.inter(
-                color: textPrimary,
-                fontWeight: FontWeight.w900,
-                fontSize: 12,
-              ),
-            ),
-            Text(
-              title,
-              style: GoogleFonts.inter(color: textSecondary, fontSize: 8),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _interchangeCard(
-    MetroInterchange interchange,
-    Color inputBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF5E5CE6).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFF5E5CE6).withValues(alpha: 0.3),
-          width: 1.2,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: const BoxDecoration(
-              color: Color(0xFF5E5CE6),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              CupertinoIcons.arrow_2_squarepath,
-              color: Colors.white,
-              size: 14,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'INTERCHANGE TRANSFER 🔀',
-                  style: GoogleFonts.inter(
-                    color: const Color(0xFF5E5CE6),
-                    fontWeight: FontWeight.w900,
-                    fontSize: 8.5,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Change at ${interchange.stationName}',
-                  style: GoogleFonts.inter(
-                    color: textPrimary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      'Switch from ${interchange.fromLine} ➔ ',
-                      style: GoogleFonts.inter(
-                        color: textSecondary,
-                        fontSize: 10,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: interchange.toLineColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        interchange.toLine,
-                        style: GoogleFonts.inter(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 9.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _routeSegmentItem(
-    MetroRouteSegment seg,
-    MetroRoute route,
-    Color inputBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: inputBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: seg.lineColor.withValues(alpha: 0.3),
-          width: 1.2,
-        ),
-      ),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(top: 8),
-        iconColor: seg.lineColor,
-        collapsedIconColor: textSecondary,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: seg.lineColor,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                seg.lineName,
-                style: GoogleFonts.inter(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 10,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '${seg.fromStation} ➔ ${seg.toStation}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(
-                  color: textPrimary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            '${seg.stations.length - 1} stops • ~${seg.durationMinutes} mins • ${seg.distanceKm} km',
-            style: GoogleFonts.inter(color: textSecondary, fontSize: 10),
-          ),
-        ),
-        children: [
-          Divider(color: borderCol, height: 1),
-          const SizedBox(height: 8),
-          ...seg.stations.asMap().entries.map((entry) {
-            final idx = entry.key;
-            final st = entry.value;
-            final isFirst = idx == 0;
-            final isLast = idx == seg.stations.length - 1;
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
-              child: Row(
-                children: [
-                  Icon(
-                    isFirst || isLast
-                        ? CupertinoIcons.circle_fill
-                        : CupertinoIcons.circle,
-                    color: isFirst || isLast ? seg.lineColor : textSecondary,
-                    size: 9,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    st,
-                    style: GoogleFonts.inter(
-                      color: isFirst || isLast ? textPrimary : textSecondary,
-                      fontWeight: isFirst || isLast
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
         ],
       ),
     );
@@ -1634,8 +1682,10 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     Color textSecondary,
     Color borderCol,
   ) {
+    final net = _selectedNetwork;
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(22),
@@ -1644,24 +1694,34 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'TICKETING & CARD OPTIONS',
-            style: GoogleFonts.inter(
-              color: textSecondary,
-              fontSize: 9,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1,
-            ),
+          Row(
+            children: [
+              const Icon(
+                CupertinoIcons.qrcode,
+                color: Color(0xFF0A84FF),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'TICKETING & SMART CARD OPTIONS',
+                style: GoogleFonts.inter(
+                  color: textPrimary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          ..._selectedNetwork.ticketingOptions.map((opt) {
+          const SizedBox(height: 12),
+          ...net.ticketingOptions.map((opt) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
                   const Icon(
-                    CupertinoIcons.checkmark_seal_fill,
-                    color: Color(0xFF0A84FF),
+                    CupertinoIcons.checkmark_alt_circle_fill,
+                    color: Color(0xFF30D158),
                     size: 14,
                   ),
                   const SizedBox(width: 8),
@@ -1669,8 +1729,8 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                     child: Text(
                       opt,
                       style: GoogleFonts.inter(
-                        color: textPrimary,
-                        fontSize: 11.5,
+                        color: textSecondary,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1684,7 +1744,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     );
   }
 
-  // ================= TAB 2: ZOOMABLE NETWORK MAP =================
+  // ================= TAB 2: GIS MAP =================
   Widget _buildZoomableMapTab(
     bool isMobile,
     Color cardBg,
@@ -1693,90 +1753,18 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     Color borderCol,
     bool isDark,
   ) {
-    final highlighted = <String>[];
-    if (_calculatedRoutes.isNotEmpty) {
-      final activeRoute =
-          _calculatedRoutes[_selectedRouteIndex.clamp(
-            0,
-            _calculatedRoutes.length - 1,
-          )];
-      for (final seg in activeRoute.segments) {
-        highlighted.addAll(seg.stations);
-      }
-    }
-
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 12 : 24,
-        vertical: 8,
-      ),
+    return Padding(
+      padding: EdgeInsets.all(isMobile ? 12 : 24),
       child: Column(
         children: [
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: MetroDataRepository.networks.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final net = MetroDataRepository.networks[index];
-                final isSelected = _selectedNetwork.id == net.id;
-                return ChoiceChip(
-                  label: Text(
-                    net.cityName,
-                    style: GoogleFonts.inter(
-                      color: isSelected ? Colors.white : textPrimary,
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.w600,
-                      fontSize: 11,
-                    ),
-                  ),
-                  selected: isSelected,
-                  selectedColor: const Color(0xFF0A84FF),
-                  backgroundColor: cardBg,
-                  showCheckmark: false,
-                  onSelected: (_) {
-                    setState(() {
-                      _selectedNetwork = net;
-                      _sourceStation = null;
-                      _destinationStation = null;
-                      _calculatedRoutes = [];
-                      _selectedRouteIndex = 0;
-                    });
-                    _syncLiveWebData();
-                  },
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 10),
-
           Expanded(
-            child: MetroInteractiveMapView(
-              network: _selectedNetwork,
-              sourceStation: _sourceStation,
-              destinationStation: _destinationStation,
-              highlightedStations: highlighted,
-              onStationTap: (action) {
-                if (action.startsWith('START|')) {
-                  setState(() {
-                    _sourceStation = action.split('|')[1];
-                    _currentViewMode = 0;
-                  });
-                  if (_sourceStation != null && _destinationStation != null) {
-                    _calculateRoute();
-                  }
-                } else if (action.startsWith('DESTINATION|')) {
-                  setState(() {
-                    _destinationStation = action.split('|')[1];
-                    _currentViewMode = 0;
-                  });
-                  if (_sourceStation != null && _destinationStation != null) {
-                    _calculateRoute();
-                  }
-                }
-              },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: MetroInteractiveMapView(
+                network: _selectedNetwork,
+                sourceStation: _sourceStation,
+                destinationStation: _destinationStation,
+              ),
             ),
           ),
         ],
@@ -1794,7 +1782,7 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
     Color inputBg,
     bool isDark,
   ) {
-    final networks = _filteredNetworks;
+    final filtered = _filteredNetworks;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1803,186 +1791,259 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
         vertical: 12,
       ),
       child: ResponsiveContainer(
-        maxWidth: 960,
+        maxWidth: 1100,
         padding: EdgeInsets.zero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _searchBar(cardBg, textPrimary, textSecondary, borderCol, inputBg),
-            const SizedBox(height: 14),
-            _cityFilterBar(cardBg, textPrimary, textSecondary, borderCol),
-            const SizedBox(height: 18),
-            if (networks.isEmpty)
-              _noResultsView(cardBg, textPrimary, textSecondary, borderCol)
-            else
-              ...networks.map(
-                (net) => _networkCard(
-                  net,
-                  cardBg,
-                  textPrimary,
-                  textSecondary,
-                  borderCol,
-                  inputBg,
+            // Search Input Field
+            Container(
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: borderCol),
+              ),
+              child: TextField(
+                controller: _searchCtrl,
+                style: GoogleFonts.inter(color: textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Search city, line color, or metro station...',
+                  hintStyle: GoogleFonts.inter(
+                    color: textSecondary,
+                    fontSize: 12,
+                  ),
+                  prefixIcon: const Icon(
+                    CupertinoIcons.search,
+                    color: Color(0xFF0A84FF),
+                    size: 18,
+                  ),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(
+                            CupertinoIcons.clear_circled_solid,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
+                          onPressed: () => _searchCtrl.clear(),
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Filter City Chips Row
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: _cityFilters.map((city) {
+                  final isSelected = _selectedCityFilter == city;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(city),
+                      selected: isSelected,
+                      onSelected: (_) {
+                        setState(() => _selectedCityFilter = city);
+                      },
+                      selectedColor: const Color(0xFF0A84FF),
+                      backgroundColor: cardBg,
+                      side: BorderSide(
+                        color: isSelected
+                            ? const Color(0xFF0A84FF)
+                            : borderCol,
+                      ),
+                      labelStyle: GoogleFonts.inter(
+                        color: isSelected ? Colors.white : textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            // Networks Grid
+            filtered.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(40),
+                      child: Column(
+                        children: [
+                          Icon(
+                            CupertinoIcons.building_2_fill,
+                            color: textSecondary,
+                            size: 40,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No metro networks found for "$_searchQuery"',
+                            style: GoogleFonts.inter(
+                              color: textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 14),
+                    itemBuilder: (ctx, idx) {
+                      final net = filtered[idx];
+                      return _CityNetworkCardWidget(
+                        baseNetwork: net,
+                        cardBg: cardBg,
+                        textPrimary: textPrimary,
+                        textSecondary: textSecondary,
+                        borderCol: borderCol,
+                        inputBg: inputBg,
+                        isDark: isDark,
+                        onPlanRouteTap: (selectedNet) {
+                          setState(() {
+                            _selectedNetwork = selectedNet;
+                            _currentViewMode = 0;
+                          });
+                          _syncLiveWebData();
+                        },
+                      );
+                    },
+                  ),
+            const SizedBox(height: 24),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _searchBar(
-    Color cardBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-    Color inputBg,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderCol),
-      ),
-      child: TextField(
-        controller: _searchCtrl,
-        style: GoogleFonts.inter(color: textPrimary, fontSize: 13),
-        decoration: InputDecoration(
-          hintText:
-              'Search city, state, operator or line (e.g. Delhi, DMRC, Blue Line)...',
-          hintStyle: GoogleFonts.inter(color: textSecondary, fontSize: 12),
-          prefixIcon: const Icon(
-            CupertinoIcons.search,
-            color: Color(0xFF0A84FF),
-            size: 18,
-          ),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(
-                    CupertinoIcons.xmark_circle_fill,
-                    color: Colors.grey,
-                    size: 16,
-                  ),
-                  onPressed: () => _searchCtrl.clear(),
-                )
-              : null,
-        ),
-      ),
-    );
+class _CityNetworkCardWidget extends StatefulWidget {
+  final MetroNetwork baseNetwork;
+  final Function(MetroNetwork selected) onPlanRouteTap;
+  final Color cardBg;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color borderCol;
+  final Color inputBg;
+  final bool isDark;
+
+  const _CityNetworkCardWidget({
+    required this.baseNetwork,
+    required this.onPlanRouteTap,
+    required this.cardBg,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.borderCol,
+    required this.inputBg,
+    required this.isDark,
+  });
+
+  @override
+  State<_CityNetworkCardWidget> createState() => _CityNetworkCardWidgetState();
+}
+
+class _CityNetworkCardWidgetState extends State<_CityNetworkCardWidget> {
+  late MetroNetwork _liveNetwork;
+  bool _loadingLive = false;
+  String? _expandedLineName;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveNetwork = widget.baseNetwork;
+    _fetchLive();
   }
 
-  Widget _cityFilterBar(
-    Color cardBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    final cities = _cityFilters;
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: cities.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final city = cities[index];
-          final isSelected = _selectedCityFilter == city;
-          return ChoiceChip(
-            label: Text(
-              city,
-              style: GoogleFonts.inter(
-                color: isSelected ? Colors.white : textPrimary,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                fontSize: 11,
-              ),
-            ),
-            selected: isSelected,
-            selectedColor: const Color(0xFF0A84FF),
-            backgroundColor: cardBg,
-            showCheckmark: false,
-            onSelected: (_) {
-              setState(() => _selectedCityFilter = city);
-            },
-          );
-        },
-      ),
-    );
+  void _fetchLive() async {
+    setState(() => _loadingLive = true);
+    try {
+      final live = await MetroApiService.fetchDynamicTrackMyMetroNetwork(widget.baseNetwork);
+      if (mounted) {
+        setState(() {
+          _liveNetwork = live;
+          _loadingLive = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingLive = false);
+    }
   }
 
-  Widget _noResultsView(
-    Color cardBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(28),
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: borderCol),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            CupertinoIcons.search_circle,
-            color: Colors.grey,
-            size: 40,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'No Metro Networks Found',
-            style: GoogleFonts.inter(
-              color: textPrimary,
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Try searching for another city, state, or operator name.',
-            style: GoogleFonts.inter(color: textSecondary, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
+  @override
+  Widget build(BuildContext context) {
+    final net = _liveNetwork;
 
-  Widget _networkCard(
-    MetroNetwork net,
-    Color cardBg,
-    Color textPrimary,
-    Color textSecondary,
-    Color borderCol,
-    Color inputBg,
-  ) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: cardBg,
+        color: widget.cardBg,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: borderCol),
+        border: Border.all(color: widget.borderCol),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              // Metro Network Branding Logo Badge
               Container(
-                padding: const EdgeInsets.all(10),
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0A84FF).withValues(alpha: 0.15),
+                  color: net.primaryBrandColor.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
+                  border: Border.all(
+                    color: net.primaryBrandColor.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: net.primaryBrandColor.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  CupertinoIcons.building_2_fill,
-                  color: Color(0xFF0A84FF),
-                  size: 20,
+                child: ClipOval(
+                  child: Image.network(
+                    net.defaultLogoUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              CupertinoIcons.tram_fill,
+                              color: net.primaryBrandColor,
+                              size: 16,
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              net.operatorCode,
+                              style: GoogleFonts.inter(
+                                color: net.primaryBrandColor,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 8,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1990,190 +2051,277 @@ class _MetroNetworksScreenState extends State<MetroNetworksScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '${net.cityName} Metro',
-                      style: GoogleFonts.inter(
-                        color: textPrimary,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                      ),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      children: [
+                        Text(
+                          '${net.cityName} Metro',
+                          style: GoogleFonts.inter(
+                            color: widget.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (_loadingLive)
+                          const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF0A84FF)),
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF30D158).withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'LIVE 🟢',
+                              style: GoogleFonts.inter(
+                                color: const Color(0xFF30D158),
+                                fontSize: 8.5,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     Text(
                       '${net.operatorName} • ${net.stateName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
-                        color: textSecondary,
+                        color: widget.textSecondary,
                         fontSize: 11,
                       ),
                     ),
                   ],
                 ),
               ),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _selectedNetwork = net;
-                    _currentViewMode = 0;
-                  });
-                  _syncLiveWebData();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0A84FF),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-                child: Text(
+              ElevatedButton.icon(
+                onPressed: () => widget.onPlanRouteTap(net),
+                icon: const Icon(CupertinoIcons.alt, size: 14),
+                label: Text(
                   'Plan Route',
                   style: GoogleFonts.inter(
                     fontWeight: FontWeight.bold,
                     fontSize: 11,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _infoPill(
-                  'LINES',
-                  '${net.lines.length}',
-                  const Color(0xFF0A84FF),
-                  inputBg,
-                  textPrimary,
-                  textSecondary,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _infoPill(
-                  'STATIONS',
-                  '${net.totalStations}',
-                  const Color(0xFF30D158),
-                  inputBg,
-                  textPrimary,
-                  textSecondary,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _infoPill(
-                  'NETWORK',
-                  '${net.totalNetworkKm} km',
-                  const Color(0xFFFF9F0A),
-                  inputBg,
-                  textPrimary,
-                  textSecondary,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0A84FF),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ],
           ),
+
           const SizedBox(height: 14),
+
+          // Live Stats Chips
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: net.lines.map((l) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: l.color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: l.color.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: l.color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${l.name} (${l.stationsCount})',
-                      style: GoogleFonts.inter(
-                        color: l.color,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _infoChip(
+                '${net.totalStations} Operational Stations',
+                CupertinoIcons.tram_fill,
+                widget.inputBg,
+                widget.textSecondary,
+                widget.borderCol,
+              ),
+              _infoChip(
+                '${net.totalNetworkKm} km Network',
+                CupertinoIcons.map,
+                widget.inputBg,
+                widget.textSecondary,
+                widget.borderCol,
+              ),
+              _infoChip(
+                '${net.lines.length} Active Lines',
+                CupertinoIcons.color_filter,
+                widget.inputBg,
+                widget.textSecondary,
+                widget.borderCol,
+              ),
+              _infoChip(
+                net.fareRange,
+                CupertinoIcons.ticket_fill,
+                widget.inputBg,
+                widget.textSecondary,
+                widget.borderCol,
+              ),
+            ],
           ),
-          if (net.websiteUrl != null) ...[
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                const Spacer(),
-                GestureDetector(
-                  onTap: () => _openUrl(net.websiteUrl),
-                  child: Row(
+
+          const SizedBox(height: 14),
+
+          // Live Lines & Stations Breakdown
+          Text(
+            'LIVE OPERATIONAL METRO LINES (${net.lines.length}):',
+            style: GoogleFonts.inter(
+              color: widget.textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          ...net.lines.map((line) {
+            final isExpanded = _expandedLineName == line.name;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(
+                color: widget.inputBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: widget.borderCol),
+              ),
+              child: InkWell(
+                onTap: () {
+                  setState(() {
+                    _expandedLineName = isExpanded ? null : line.name;
+                  });
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Official Web Portal',
-                        style: GoogleFonts.inter(
-                          color: const Color(0xFF0A84FF),
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                      Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: line.color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  line.name,
+                                  style: GoogleFonts.inter(
+                                    color: widget.textPrimary,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  line.route,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.inter(
+                                    color: widget.textSecondary,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            '${line.stationsCount} stns',
+                            style: GoogleFonts.inter(
+                              color: widget.textSecondary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Icon(
+                            isExpanded ? CupertinoIcons.chevron_up : CupertinoIcons.chevron_down,
+                            size: 12,
+                            color: const Color(0xFF0A84FF),
+                          ),
+                        ],
+                      ),
+
+                      if (isExpanded && line.stations.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Divider(color: widget.borderCol, height: 1),
+                        const SizedBox(height: 8),
+                        Text(
+                          'STATIONS ON THIS LINE:',
+                          style: GoogleFonts.inter(
+                            color: widget.textSecondary,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        CupertinoIcons.arrow_up_right_square,
-                        color: Color(0xFF0A84FF),
-                        size: 13,
-                      ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: line.stations.map((st) {
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: line.color.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: line.color.withValues(alpha: 0.3)),
+                              ),
+                              child: Text(
+                                st,
+                                style: GoogleFonts.inter(
+                                  color: widget.textPrimary,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-              ],
-            ),
-          ],
+              ),
+            );
+          }),
         ],
       ),
     );
   }
 
-  Widget _infoPill(
-    String title,
-    String val,
-    Color accent,
+  Widget _infoChip(
+    String label,
+    IconData icon,
     Color inputBg,
-    Color textPrimary,
     Color textSecondary,
+    Color borderCol,
   ) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: inputBg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderCol),
       ),
-      child: Column(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
+          Icon(icon, size: 12, color: const Color(0xFF0A84FF)),
+          const SizedBox(width: 6),
           Text(
-            val,
-            style: GoogleFonts.inter(
-              color: accent,
-              fontWeight: FontWeight.w900,
-              fontSize: 13,
-            ),
-          ),
-          Text(
-            title,
+            label,
             style: GoogleFonts.inter(
               color: textSecondary,
-              fontSize: 8,
+              fontSize: 11,
               fontWeight: FontWeight.bold,
             ),
           ),

@@ -50,6 +50,40 @@ class RailRadarSource {
     return _fetchSingleTrainName(no);
   }
 
+  static Future<Map<String, String>?> fetchNtesTrainLookup() async {
+    const cacheKey = 'ntes_train_lookup_cache';
+    final cached = await OfflineCache.get(cacheKey);
+    if (cached is Map) {
+      return Map<String, String>.from(cached);
+    }
+
+    final uri = Uri.parse('https://railradar.in/app/v1/lookup/trains/ntes');
+    try {
+      final res = await http.get(uri, headers: _openWebHeaders).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        if (body is Map && body['success'] == true && body['data'] is Map) {
+          final dataMap = Map<String, dynamic>.from(body['data'] as Map);
+          final result = <String, String>{};
+          dataMap.forEach((k, v) {
+            final keyStr = k.toString().trim();
+            final valStr = (v ?? '').toString().trim();
+            if (keyStr.isNotEmpty && valStr.isNotEmpty) {
+              result[keyStr] = valStr;
+            }
+          });
+          if (result.isNotEmpty) {
+            unawaited(OfflineCache.put(cacheKey, result, ttl: const Duration(days: 7)));
+            return result;
+          }
+        }
+      }
+    } catch (e) {
+      _debug('[RailRadar] NTES train lookup failed: $e');
+    }
+    return null;
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // 1. TRAIN AUTOCOMPLETE SEARCH (Open Web - No Key Needed)
   // ═══════════════════════════════════════════════════════════════════
@@ -112,30 +146,78 @@ class RailRadarSource {
 
     final results = <Map<String, dynamic>>[];
     final seen = <String>{};
+    final qLow = q.toLowerCase();
 
-    // 1. Open Web Direct Digits Lookup
+    // 1. Local Offline SQLite Train Catalog Match (Instant Sub-millisecond)
+    try {
+      final catalog = await OfflineCache.searchTrainCatalog(q, limit: limit);
+      for (final item in catalog) {
+        final no = (item['number'] ?? item['train_number'] ?? '').toString().trim();
+        final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
+        if (no.isNotEmpty && seen.add(no)) {
+          results.add({
+            'number': no,
+            'name': name.isNotEmpty ? name : 'Train $no',
+            'source': item['source'] ?? '',
+            'destination': item['destination'] ?? '',
+          });
+        }
+      }
+    } catch (_) {}
+
+    // 2. Local Recent/Tracked Trains Match
+    try {
+      final recent = await OfflineCache.getRecentTrains(limit: 50);
+      for (final t in recent) {
+        final no = t['train_number']?.toString().trim() ?? '';
+        final name = t['train_name']?.toString().trim() ?? '';
+        if (no.isNotEmpty &&
+            (no.toLowerCase().contains(qLow) || name.toLowerCase().contains(qLow))) {
+          if (seen.add(no)) {
+            results.add({
+              'number': no,
+              'name': name.isNotEmpty ? name : 'Train $no',
+              'source': t['source'] ?? t['from'] ?? '',
+              'destination': t['destination'] ?? t['to'] ?? '',
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Open Web Direct Digits Lookup
     final digits = q.replaceAll(RegExp(r'\D'), '');
     if (digits.length >= 2) {
       final single = await _fetchSingleTrainName(digits);
       if (single['name'] != null && single['name'] != 'Train $digits') {
         final no = single['number']?.toString() ?? digits;
         if (seen.add(no)) {
-          results.add(single);
+          results.insert(0, single);
         }
       }
     }
 
-    // 2. Open Web Live Radar Map Candidate Lookup
+    // 3. Open Web Live Radar Map Candidate Lookup (Matching Number AND Name)
     try {
-      final liveMapList = await liveMap();
+      final liveMapList = await liveMap(timeout: const Duration(seconds: 3));
       if (liveMapList != null) {
-        final qLow = q.toLowerCase();
         final candidateNumbers = <String>[];
 
         for (final item in liveMapList) {
+          String no = '';
+          String name = '';
           if (item is List && item.isNotEmpty) {
-            final no = item[0]?.toString().trim() ?? '';
-            if (no.isNotEmpty && !seen.contains(no) && no.toLowerCase().contains(qLow)) {
+            no = item[0]?.toString().trim() ?? '';
+            if (item.length > 1) {
+              name = item[1]?.toString().trim() ?? '';
+            }
+          } else if (item is Map) {
+            no = (item['train_number'] ?? item['number'] ?? item['trainNo'] ?? '').toString().trim();
+            name = (item['train_name'] ?? item['name'] ?? '').toString().trim();
+          }
+
+          if (no.isNotEmpty && !seen.contains(no)) {
+            if (no.toLowerCase().contains(qLow) || (name.isNotEmpty && name.toLowerCase().contains(qLow))) {
               seen.add(no);
               candidateNumbers.add(no);
               if (candidateNumbers.length >= (limit - results.length)) break;
@@ -147,7 +229,11 @@ class RailRadarSource {
           final resolvedList = await Future.wait(
             candidateNumbers.map((no) => _fetchSingleTrainName(no)),
           );
-          results.addAll(resolvedList);
+          for (final res in resolvedList) {
+            if (res['number'] != null) {
+              results.add(res);
+            }
+          }
         }
       }
     } catch (_) {}
@@ -210,17 +296,20 @@ class RailRadarSource {
   static Future<Map<String, dynamic>?> liveTracking(
     String trainNumber, {
     bool includeGeometry = true,
+    String? date,
   }) async {
     final cleanNo = trainNumber.trim().split(' - ').first;
     if (cleanNo.isEmpty) return null;
 
-    final cacheKey = 'live_$cleanNo';
+    final dateQuery = (date != null && date.isNotEmpty) ? '&date=$date' : '';
+    final cacheKey = (date != null && date.isNotEmpty) ? 'live_${cleanNo}_$date' : 'live_$cleanNo';
     final uri = Uri.parse(
       '${SecurityUtils.railRadarTrainsUrl}$cleanNo/live'
       '?geometry=${includeGeometry ? "true" : "false"}'
       '&format=polyline'
       '&includeCoordinates=true'
-      '&haltsOnly=false',
+      '&haltsOnly=false'
+      '$dateQuery',
     );
 
     // Direct HTTP call with custom headers matching web browser
@@ -327,11 +416,16 @@ class RailRadarSource {
   // ═══════════════════════════════════════════════════════════════════
   // 6. NATIONAL LIVE MAP RADAR (2,000+ Active Trains - Open Web)
   // ═══════════════════════════════════════════════════════════════════
-  static Future<List<dynamic>?> liveMap() async {
+  static Future<List<dynamic>?> liveMap({Duration? timeout}) async {
     const cacheKey = 'radar_live_map_cache';
+    final cached = await OfflineCache.get(cacheKey);
+    if (cached is List && cached.isNotEmpty) {
+      return cached;
+    }
+
     final uri = Uri.parse(SecurityUtils.railRadarLiveMapUrl);
 
-    final body = await _getJsonWithCorsFallback(uri);
+    final body = await _getJsonWithCorsFallback(uri, timeout: timeout);
     if (body != null) {
       List<dynamic>? list;
       if (body is Map && body['success'] == true && body['data'] is List) {
@@ -346,12 +440,6 @@ class RailRadarSource {
         unawaited(OfflineCache.put(cacheKey, list, ttl: const Duration(minutes: 15)));
         return list;
       }
-    }
-
-    // Fallback to SQLite cache on network/CORS failure
-    final cached = await OfflineCache.get(cacheKey);
-    if (cached is List && cached.isNotEmpty) {
-      return cached;
     }
 
     return null;
@@ -532,10 +620,10 @@ class RailRadarSource {
   // 13. TRAIN SCHEDULE & ROUTE GEOMETRY (Open Web)
   // ═══════════════════════════════════════════════════════════════════
   static Future<Map<String, dynamic>?> trainSchedule(String trainNumber) async {
-    return liveTracking(trainNumber, includeGeometry: true);
+    return liveTracking(trainNumber, includeGeometry: true, date: '');
   }
 
   static Future<Map<String, dynamic>?> trainRouteGeometry(String trainNumber) async {
-    return liveTracking(trainNumber, includeGeometry: true);
+    return liveTracking(trainNumber, includeGeometry: true, date: '');
   }
 }

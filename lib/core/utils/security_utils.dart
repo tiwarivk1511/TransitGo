@@ -17,7 +17,7 @@ class SecurityUtils {
   static const String _encYoMetroRoute = 'Mi4uKilgdXUjNTc/Lig1dDk1N3U7KjN1KDUvLj90KjIqZSk2Lz1n';
   static const String _encYoMetroCities = 'Mi4uKilgdXU3Py4oNXQjNTM0PCg7dDk1N3U7KjN1OTMuMz8p';
   static const String _encYoMetroMapBase = 'Mi4uKilgdXUjNTc/Lig1dDk1N3UzNzs9Pyl1NzsqKXU=';
-  static const String _encTrackMyMetroBase = 'Mi4uKilgdXU.KDs5MTcjNz8uKDV0OTU3dT47Ljt1KS47LjM1NCl3';
+  static const String _encTrackMyMetroBase = 'Ijo2OWhlZTo4MzEpJ0cnPzo4JSBoMSUnZT41OjVlOTU1NS8lJDUv';
   static const String _encCorsProxy = 'Mi4uKilgdXU9NSgpKig1IiN0MzV1ZQ==';
 
   // In-memory URL cache for 0ms sub-microsecond access

@@ -10,7 +10,7 @@ class OfflineCache {
   static Future<Database>? _opening;
   static SharedPreferences? _prefs;
   static const String _dbName = 'transitgo_v2.db';
-  static const int _dbVersion = 3;
+  static const int _dbVersion = 4;
 
   static Future<void> _initWeb() async {
     if (_prefs == null && kIsWeb) {
@@ -118,6 +118,17 @@ class OfflineCache {
         updated INTEGER NOT NULL
       )
     ''');
+    await db.execute('''
+      CREATE TABLE train_catalog(
+        train_number TEXT PRIMARY KEY,
+        train_name   TEXT NOT NULL,
+        source       TEXT,
+        destination  TEXT,
+        updated      INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_catalog_num ON train_catalog(train_number)');
+    await db.execute('CREATE INDEX idx_catalog_name ON train_catalog(train_name)');
   }
 
   static Future<void> _onUpgrade(
@@ -133,6 +144,19 @@ class OfflineCache {
           updated INTEGER NOT NULL
         )
       ''');
+    }
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE train_catalog(
+          train_number TEXT PRIMARY KEY,
+          train_name   TEXT NOT NULL,
+          source       TEXT,
+          destination  TEXT,
+          updated      INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX idx_catalog_num ON train_catalog(train_number)');
+      await db.execute('CREATE INDEX idx_catalog_name ON train_catalog(train_name)');
     }
   }
 
@@ -643,6 +667,153 @@ class OfflineCache {
           ),
         )
         .toList();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 6. TRAIN CATALOG (Offline Train Search Database)
+  // ═══════════════════════════════════════════════════════════════════
+  static Future<void> saveTrainCatalog(List<Map<String, dynamic>> trains) async {
+    if (trains.isEmpty) return;
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (kIsWeb) {
+        await _initWeb();
+        final existingStr = _prefs?.getString('train_catalog_data');
+        final Map<String, dynamic> catalogMap = existingStr != null
+            ? Map<String, dynamic>.from(jsonDecode(existingStr) as Map)
+            : {};
+        for (final t in trains) {
+          final no = (t['number'] ?? t['train_number'] ?? '').toString().trim();
+          final name = (t['name'] ?? t['train_name'] ?? '').toString().trim();
+          if (no.isNotEmpty) {
+            catalogMap[no] = {
+              'number': no,
+              'name': name.isNotEmpty ? name : 'Train $no',
+              'source': (t['source'] ?? t['from'] ?? '').toString().trim(),
+              'destination': (t['destination'] ?? t['to'] ?? '').toString().trim(),
+              'updated': now,
+            };
+          }
+        }
+        await _prefs?.setString('train_catalog_data', jsonEncode(catalogMap));
+        return;
+      }
+
+      final db = await instance;
+      final batch = db.batch();
+      for (final t in trains) {
+        final no = (t['number'] ?? t['train_number'] ?? '').toString().trim();
+        final name = (t['name'] ?? t['train_name'] ?? '').toString().trim();
+        if (no.isNotEmpty) {
+          batch.insert(
+            'train_catalog',
+            {
+              'train_number': no,
+              'train_name': name.isNotEmpty ? name : 'Train $no',
+              'source': (t['source'] ?? t['from'] ?? '').toString().trim(),
+              'destination': (t['destination'] ?? t['to'] ?? '').toString().trim(),
+              'updated': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+      await batch.commit(noResult: true);
+    } catch (e) {
+      debugPrint('[OfflineCache] saveTrainCatalog failed: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> searchTrainCatalog(
+    String query, {
+    int limit = 10,
+  }) async {
+    final q = query.trim();
+    if (q.isEmpty) return [];
+    final qLow = q.toLowerCase();
+
+    try {
+      if (kIsWeb) {
+        await _initWeb();
+        final str = _prefs?.getString('train_catalog_data');
+        if (str == null) return [];
+        final Map<String, dynamic> catalogMap =
+            Map<String, dynamic>.from(jsonDecode(str) as Map);
+        final matches = <Map<String, dynamic>>[];
+        for (final entry in catalogMap.values) {
+          if (entry is Map) {
+            final no = (entry['number'] ?? '').toString().toLowerCase();
+            final name = (entry['name'] ?? '').toString().toLowerCase();
+            if (no.contains(qLow) || name.contains(qLow)) {
+              matches.add(Map<String, dynamic>.from(entry));
+            }
+          }
+        }
+        matches.sort((a, b) {
+          final aNo = (a['number'] ?? '').toString().toLowerCase();
+          final bNo = (b['number'] ?? '').toString().toLowerCase();
+          final aName = (a['name'] ?? '').toString().toLowerCase();
+          final bName = (b['name'] ?? '').toString().toLowerCase();
+          if (aNo == qLow) return -1;
+          if (bNo == qLow) return 1;
+          if (aNo.startsWith(qLow) && !bNo.startsWith(qLow)) return -1;
+          if (!aNo.startsWith(qLow) && bNo.startsWith(qLow)) return 1;
+          if (aName.startsWith(qLow) && !bName.startsWith(qLow)) return -1;
+          if (!aName.startsWith(qLow) && bName.startsWith(qLow)) return 1;
+          return 0;
+        });
+        return matches.take(limit).toList();
+      }
+
+      final db = await instance;
+      final rows = await db.rawQuery(
+        '''
+        SELECT train_number, train_name, source, destination
+        FROM train_catalog
+        WHERE train_number LIKE ? OR train_name LIKE ?
+        ORDER BY
+          CASE
+            WHEN train_number = ? THEN 1
+            WHEN train_number LIKE ? THEN 2
+            WHEN train_name LIKE ? THEN 3
+            ELSE 4
+          END
+        LIMIT ?
+        ''',
+        ['%$q%', '%$q%', q, '$q%', '$q%', limit],
+      );
+
+      return rows
+          .map((r) => {
+                'number': r['train_number'],
+                'name': r['train_name'],
+                'source': r['source'],
+                'destination': r['destination'],
+              })
+          .toList();
+    } catch (e) {
+      debugPrint('[OfflineCache] searchTrainCatalog failed: $e');
+      return [];
+    }
+  }
+
+  static Future<List<String>> getUnresolvedCatalogTrainNumbers({int limit = 100}) async {
+    try {
+      if (kIsWeb) return [];
+      final db = await instance;
+      final rows = await db.rawQuery(
+        '''
+        SELECT train_number
+        FROM train_catalog
+        WHERE train_name LIKE 'Train %' OR train_name = '' OR LENGTH(train_name) < 3 OR train_name GLOB '[0-9]*'
+        LIMIT ?
+        ''',
+        [limit],
+      );
+      return rows.map((r) => r['train_number'].toString()).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════

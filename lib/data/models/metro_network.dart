@@ -1,5 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../../services/metro_api_service.dart';
 
 class MetroLine {
   final String name;
@@ -39,6 +40,7 @@ class MetroNetwork {
   final List<String> highlights;
   final String? websiteUrl;
   final String? mapUrl;
+  final String? logoUrl;
 
   const MetroNetwork({
     required this.id,
@@ -54,7 +56,89 @@ class MetroNetwork {
     required this.highlights,
     this.websiteUrl,
     this.mapUrl,
+    this.logoUrl,
   });
+
+  String get defaultLogoUrl {
+    if (logoUrl != null && logoUrl!.isNotEmpty) return logoUrl!;
+
+    switch (id.toLowerCase()) {
+      case 'delhi':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Delhi_Metro_logo.svg';
+      case 'mumbai':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Mumbai_Metro_Logo.svg';
+      case 'bengaluru':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Namma_Metro_logo.svg';
+      case 'kolkata':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Kolkata_Metro_Logo.svg';
+      case 'hyderabad':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Hyderabad_Metro_Logo.png';
+      case 'chennai':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Chennai_Metro_logo.svg';
+      case 'kochi':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Kochi_Metro_logo.svg';
+      case 'pune':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Pune_Metro_Logo.svg';
+      case 'ahmedabad':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Ahmedabad_Metro_Logo.svg';
+      case 'jaipur':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Jaipur_Metro_Logo.svg';
+      case 'lucknow':
+      case 'kanpur':
+      case 'agra':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Lucknow_Metro_Logo.svg';
+      case 'nagpur':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Nagpur_Metro_Logo.svg';
+      case 'noida':
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Noida_Metro_Logo.svg';
+      default:
+        return 'https://commons.wikimedia.org/wiki/Special:FilePath/Delhi_Metro_logo.svg';
+    }
+  }
+
+  Color get primaryBrandColor {
+    switch (id.toLowerCase()) {
+      case 'delhi':
+        return const Color(0xFFE53935);
+      case 'mumbai':
+        return const Color(0xFF1E88E5);
+      case 'bengaluru':
+        return const Color(0xFF8E24AA);
+      case 'kolkata':
+        return const Color(0xFF1E88E5);
+      case 'hyderabad':
+        return const Color(0xFFE53935);
+      case 'chennai':
+        return const Color(0xFF1E88E5);
+      case 'kochi':
+        return const Color(0xFF00ACC1);
+      case 'pune':
+        return const Color(0xFF8E24AA);
+      case 'ahmedabad':
+        return const Color(0xFF1E88E5);
+      case 'jaipur':
+        return const Color(0xFFEC407A);
+      case 'lucknow':
+      case 'kanpur':
+      case 'agra':
+        return const Color(0xFFE53935);
+      case 'nagpur':
+        return const Color(0xFFFB8C00);
+      case 'noida':
+        return const Color(0xFF00ACC1);
+      default:
+        return const Color(0xFF0A84FF);
+    }
+  }
+
+  String get operatorCode {
+    if (operatorName.contains('(') && operatorName.contains(')')) {
+      final match = RegExp(r'\(([^)]+)\)').firstMatch(operatorName);
+      if (match != null) return match.group(1)!;
+    }
+    final clean = cityName.replaceAll(RegExp(r'\s+.*'), '').trim();
+    return clean.substring(0, clean.length.clamp(0, 4)).toUpperCase();
+  }
 
   /// Get all unique stations in this metro network
   List<String> get allStations {
@@ -133,150 +217,14 @@ class MetroRoute {
   });
 }
 
-Set<String> _getConnectedInterchangeStations(String stationName) {
-  final set = <String>{stationName};
-  final norm = stationName.trim().toLowerCase();
-
-  // Kashmere Gate (Red / Yellow / Violet)
-  if (norm.contains('kashmere gate')) set.add('Kashmere Gate');
-
-  // Rajiv Chowk (Yellow / Blue)
-  if (norm.contains('rajiv chowk')) set.add('Rajiv Chowk');
-
-  // Mandi House (Blue / Violet)
-  if (norm.contains('mandi house')) set.add('Mandi House');
-
-  // Central Secretariat (Yellow / Violet)
-  if (norm.contains('central secretariat')) set.add('Central Secretariat');
-
-  // INA / Dilli Haat - INA (Yellow / Pink)
-  if (norm.contains('ina')) {
-    set.add('INA');
-    set.add('Dilli Haat - INA');
-    set.add('Dilli Haat INA');
-  }
-
-  // Hauz Khas (Yellow / Magenta)
-  if (norm.contains('hauz khas')) set.add('Hauz Khas');
-
-  // Lajpat Nagar (Violet / Pink)
-  if (norm.contains('lajpat nagar')) set.add('Lajpat Nagar');
-
-  // Kalkaji Mandir (Violet / Magenta)
-  if (norm.contains('kalkaji mandir')) set.add('Kalkaji Mandir');
-
-  // Botanical Garden (Blue / Magenta)
-  if (norm.contains('botanical garden')) set.add('Botanical Garden');
-
-  // Janakpuri West (Blue / Magenta)
-  if (norm.contains('janakpuri west')) set.add('Janakpuri West');
-
-  // Netaji Subhash Place (Red / Pink)
-  if (norm.contains('netaji subhash place') || norm.contains('nsp')) set.add('Netaji Subhash Place');
-
-  // Rajouri Garden (Blue / Pink)
-  if (norm.contains('rajouri garden')) set.add('Rajouri Garden');
-
-  // Inderlok (Red / Green)
-  if (norm.contains('inderlok')) set.add('Inderlok');
-
-  // Welcome (Red / Pink)
-  if (norm.contains('welcome')) set.add('Welcome');
-
-  // Mayur Vihar Phase-1 (Blue / Pink)
-  if (norm.contains('mayur vihar phase-1') || norm.contains('mayur vihar phase 1')) {
-    set.add('Mayur Vihar Phase-1');
-    set.add('Mayur Vihar Phase 1');
-  }
-
-  // Anand Vihar (Blue / Pink / RRTS)
-  if (norm.contains('anand vihar')) {
-    set.add('Anand Vihar');
-    set.add('Anand Vihar ISBT');
-    set.add('Anand Vihar RRTS');
-  }
-
-  // Karkarduma (Blue / Pink)
-  if (norm.contains('karkarduma') || norm.contains('karkardooma')) {
-    set.add('Karkarduma');
-    set.add('Karkarduma Court');
-  }
-
-  // Punjabi Bagh West (Green / Pink)
-  if (norm.contains('punjabi bagh')) {
-    set.add('Punjabi Bagh');
-    set.add('Punjabi Bagh West');
-  }
-
-  // Kirti Nagar (Blue / Green)
-  if (norm.contains('kirti nagar')) set.add('Kirti Nagar');
-
-  // Yamuna Bank (Blue Main / Blue Branch)
-  if (norm.contains('yamuna bank')) set.add('Yamuna Bank');
-
-  // New Delhi (Yellow / Airport Express)
-  if (norm.contains('new delhi')) set.add('New Delhi');
-
-  // Dwarka Sector 21 (Blue / Airport Express)
-  if (norm.contains('dwarka sector 21') || norm.contains('dwarka sec 21')) set.add('Dwarka Sector 21');
-
-  // Dhaula Kuan / South Campus
-  if (norm.contains('dhaula kuan') || norm.contains('durgabai deshmukh')) {
-    set.add('Dhaula Kuan');
-    set.add('Durgabai Deshmukh South Campus');
-  }
-
-  // Noida Sec 52 (Blue) <-> Noida Sec 51 (Aqua)
-  if (norm.contains('noida sector 52') || norm.contains('noida sec 52') || norm.contains('noida sector 51') || norm.contains('noida sec 51')) {
-    set.add('Noida Sector 52');
-    set.add('Noida Sector 51');
-  }
-
-  // Sikanderpur (Yellow / Rapid Metro)
-  if (norm.contains('sikanderpur')) set.add('Sikanderpur');
-
-  // Majestic (Bengaluru Purple/Green Line)
-  if (norm.contains('majestic') || norm.contains('kempegowda')) {
-    set.add('Nadaprabhu Kempegowda Station Majestic');
-    set.add('Nadaprabhu Kempegowda Station, Majestic');
-    set.add('Majestic');
-  }
-
-  // Mumbai: DN Nagar (Line 1) <-> Andheri West (Line 2A)
-  if (norm.contains('dn nagar') || norm.contains('d.n. nagar') || norm.contains('andheri west')) {
-    set.add('DN Nagar');
-    set.add('D.N. Nagar');
-    set.add('Andheri West');
-  }
-
-  // Mumbai: Western Express Highway (Line 1) <-> Gundavali (Line 7)
-  if (norm.contains('western express highway') || norm.contains('gundavali')) {
-    set.add('Western Express Highway');
-    set.add('Gundavali');
-  }
-
-  // Chennai Central
-  if (norm.contains('chennai central') || norm.contains('puratchi thalaivar')) {
-    set.add('Puratchi Thalaivar Dr. M.G. Ramachandran Central');
-    set.add('Chennai Central');
-  }
-
-  // Chennai Alandur
-  if (norm.contains('alandur')) {
-    set.add('Alandur');
-    set.add('Arignar Anna Alandur');
-  }
-
-  return set;
-}
-
 class MetroRouteCalculator {
   static MetroRoute? findRoute(
     MetroNetwork network,
     String source,
     String destination,
   ) {
-    return null;
+    final routes = findRoutes(network, source, destination);
+    return routes.isNotEmpty ? routes.first : null;
   }
 
   static List<MetroRoute> findRoutes(
@@ -284,13 +232,177 @@ class MetroRouteCalculator {
     String source,
     String destination,
   ) {
+    if (source.trim().isEmpty || destination.trim().isEmpty) return const [];
+    if (source.trim().toLowerCase() == destination.trim().toLowerCase()) return const [];
+
+    final route = _bfsShortestPath(network, source, destination);
+    if (route != null) return [route];
     return const [];
+  }
+
+  static MetroRoute? _bfsShortestPath(
+    MetroNetwork network,
+    String source,
+    String destination,
+  ) {
+    final lines = network.lines;
+    if (lines.isEmpty) return null;
+
+    final adj = <String, List<({String station, MetroLine line})>>{};
+
+    for (final line in lines) {
+      final stns = line.stations;
+      for (var i = 0; i < stns.length; i++) {
+        final curr = stns[i].trim();
+        if (curr.isEmpty) continue;
+
+        adj.putIfAbsent(curr.toLowerCase(), () => []);
+
+        if (i > 0) {
+          final prev = stns[i - 1].trim();
+          if (prev.isNotEmpty) {
+            adj[curr.toLowerCase()]!.add((station: prev, line: line));
+          }
+        }
+        if (i < stns.length - 1) {
+          final next = stns[i + 1].trim();
+          if (next.isNotEmpty) {
+            adj[curr.toLowerCase()]!.add((station: next, line: line));
+          }
+        }
+      }
+    }
+
+    final srcKey = source.trim().toLowerCase();
+    final dstKey = destination.trim().toLowerCase();
+
+    if (!adj.containsKey(srcKey) || !adj.containsKey(dstKey)) return null;
+
+    final queue = <List<({String station, MetroLine? line})>>[
+      [ (station: source, line: null) ]
+    ];
+    final visited = <String>{srcKey};
+
+    List<({String station, MetroLine? line})>? bestPath;
+
+    while (queue.isNotEmpty) {
+      final path = queue.removeAt(0);
+      final current = path.last;
+      final currKey = current.station.trim().toLowerCase();
+
+      if (currKey == dstKey) {
+        bestPath = path;
+        break;
+      }
+
+      final neighbors = adj[currKey] ?? const [];
+      for (final nbr in neighbors) {
+        final nbrKey = nbr.station.trim().toLowerCase();
+        if (visited.add(nbrKey)) {
+          queue.add([...path, (station: nbr.station, line: nbr.line)]);
+        }
+      }
+    }
+
+    if (bestPath == null || bestPath.length < 2) return null;
+
+    final segments = <MetroRouteSegment>[];
+    final interchanges = <MetroInterchange>[];
+
+    MetroLine? currentLine = bestPath[1].line;
+    List<String> currentSegmentStns = [bestPath[0].station];
+
+    for (var i = 1; i < bestPath.length; i++) {
+      final step = bestPath[i];
+      final line = step.line;
+
+      if (line == currentLine || line == null) {
+        currentSegmentStns.add(step.station);
+      } else {
+        if (currentSegmentStns.isNotEmpty) {
+          segments.add(MetroRouteSegment(
+            lineName: currentLine?.name ?? 'Metro Line',
+            lineColor: currentLine?.color ?? const Color(0xFF0A84FF),
+            fromStation: currentSegmentStns.first,
+            toStation: currentSegmentStns.last,
+            stations: List.from(currentSegmentStns),
+            distanceKm: double.parse(((currentSegmentStns.length - 1) * 1.3).toStringAsFixed(1)),
+            durationMinutes: (currentSegmentStns.length - 1) * 2,
+          ));
+        }
+
+        interchanges.add(MetroInterchange(
+          stationName: currentSegmentStns.isNotEmpty ? currentSegmentStns.last : step.station,
+          fromLine: currentLine?.name ?? '',
+          toLine: line.name,
+          toLineColor: line.color,
+        ));
+
+        currentLine = line;
+        currentSegmentStns = [step.station];
+      }
+    }
+
+    if (currentSegmentStns.isNotEmpty && currentLine != null) {
+      segments.add(MetroRouteSegment(
+        lineName: currentLine.name,
+        lineColor: currentLine.color,
+        fromStation: currentSegmentStns.first,
+        toStation: currentSegmentStns.last,
+        stations: List.from(currentSegmentStns),
+        distanceKm: double.parse(((currentSegmentStns.length - 1) * 1.3).toStringAsFixed(1)),
+        durationMinutes: (currentSegmentStns.length - 1) * 2,
+      ));
+    }
+
+    final totalStns = bestPath.length;
+    final totalKm = double.parse(((totalStns - 1) * 1.3).toStringAsFixed(1));
+    final durationMins = (totalStns - 1) * 2 + (interchanges.length * 5);
+    final fare = (totalKm * 1.5).clamp(10.0, 60.0).round();
+
+    return MetroRoute(
+      cityName: network.cityName,
+      sourceStation: source,
+      destinationStation: destination,
+      segments: segments,
+      interchanges: interchanges,
+      totalStations: totalStns,
+      totalDurationMinutes: durationMins,
+      totalDistanceKm: totalKm,
+      estimatedFare: fare,
+    );
   }
 }
 
 class MetroDataRepository {
+  static final Map<String, MetroNetwork> _liveCache = {};
+
+  /// Asynchronously fetches 100% live dynamic network data for a given city
+  static Future<MetroNetwork> getLiveNetwork(MetroNetwork baseNetwork) async {
+    if (_liveCache.containsKey(baseNetwork.id)) {
+      return _liveCache[baseNetwork.id]!;
+    }
+    final live = await MetroApiService.fetchDynamicTrackMyMetroNetwork(baseNetwork);
+    _liveCache[baseNetwork.id] = live;
+    return live;
+  }
+
+  /// Asynchronously fetches live dynamic network data for ALL Indian metro networks
+  static Future<List<MetroNetwork>> fetchAllLiveNetworks() async {
+    final results = <MetroNetwork>[];
+    for (final baseNet in networks) {
+      try {
+        final live = await getLiveNetwork(baseNet);
+        results.add(live);
+      } catch (_) {
+        results.add(baseNet);
+      }
+    }
+    return results;
+  }
+
   static final List<MetroNetwork> networks = [
-    MetroNetwork(
+    const MetroNetwork(
       id: 'delhi',
       cityName: 'Delhi NCR',
       stateName: 'Delhi / Haryana / UP',
@@ -312,7 +424,7 @@ class MetroDataRepository {
       ],
       websiteUrl: 'https://www.delhimetrorail.com',
       mapUrl: 'https://yometro.com/images/maps/delhi-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Red Line (Line 1)',
           color: Color(0xFFE53935),
@@ -387,7 +499,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'mumbai',
       cityName: 'Mumbai',
       stateName: 'Maharashtra',
@@ -407,7 +519,7 @@ class MetroDataRepository {
       ],
       websiteUrl: 'https://www.mmmocl.co.in',
       mapUrl: 'https://yometro.com/images/maps/mumbai-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Line 1 (Blue Line)',
           color: Color(0xFF1E88E5),
@@ -446,7 +558,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'kolkata',
       cityName: 'Kolkata',
       stateName: 'West Bengal',
@@ -466,7 +578,7 @@ class MetroDataRepository {
       ],
       websiteUrl: 'https://mtp.indianrailways.gov.in',
       mapUrl: 'https://yometro.com/images/maps/kolkata-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Line 1 (Blue Line - North-South)',
           color: Color(0xFF1E88E5),
@@ -487,7 +599,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'bengaluru',
       cityName: 'Bengaluru',
       stateName: 'Karnataka',
@@ -505,7 +617,7 @@ class MetroDataRepository {
       ],
       websiteUrl: 'https://www.bmrc.co.in',
       mapUrl: 'https://yometro.com/images/maps/namma-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Purple Line',
           color: Color(0xFF8E24AA),
@@ -526,7 +638,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'hyderabad',
       cityName: 'Hyderabad',
       stateName: 'Telangana',
@@ -539,7 +651,7 @@ class MetroDataRepository {
       highlights: ['Red, Blue and Green lines connecting Miyapur, Raidurg & LB Nagar'],
       websiteUrl: 'https://www.ltmetrorail.com',
       mapUrl: 'https://yometro.com/images/maps/hyderabad-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Red Line (Line 1)',
           color: Color(0xFFE53935),
@@ -560,7 +672,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'chennai',
       cityName: 'Chennai',
       stateName: 'Tamil Nadu',
@@ -573,7 +685,7 @@ class MetroDataRepository {
       highlights: ['Blue & Green Lines connecting Airport to Central & Wimco Nagar'],
       websiteUrl: 'https://chennaimetrorail.org',
       mapUrl: 'https://yometro.com/images/maps/chennai-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Blue Line (Line 1)',
           color: Color(0xFF1E88E5),
@@ -594,7 +706,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'pune',
       cityName: 'Pune',
       stateName: 'Maharashtra',
@@ -607,7 +719,7 @@ class MetroDataRepository {
       highlights: ['Purple & Aqua lines connecting PCMC to Swargate & Vanaz to Ramwadi'],
       websiteUrl: 'https://www.punemetrorail.org',
       mapUrl: 'https://yometro.com/images/maps/pune-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Purple Line (Line 1)',
           color: Color(0xFF8E24AA),
@@ -628,7 +740,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'ahmedabad',
       cityName: 'Ahmedabad / Gandhinagar',
       stateName: 'Gujarat',
@@ -641,7 +753,7 @@ class MetroDataRepository {
       highlights: ['Red & Blue lines connecting Thaltej Gam to Vastral Gam'],
       websiteUrl: 'https://www.gujaratmetrorail.com',
       mapUrl: 'https://yometro.com/images/maps/ahmedabad-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Blue Line (East-West)',
           color: Color(0xFF1E88E5),
@@ -653,7 +765,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'kochi',
       cityName: 'Kochi',
       stateName: 'Kerala',
@@ -666,7 +778,7 @@ class MetroDataRepository {
       highlights: ['Cyan Line connecting Aluva to Tripunithura'],
       websiteUrl: 'https://kochimetro.org',
       mapUrl: 'https://yometro.com/images/maps/kochi-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Cyan Line',
           color: Color(0xFF00ACC1),
@@ -678,7 +790,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'lucknow',
       cityName: 'Lucknow',
       stateName: 'Uttar Pradesh',
@@ -691,7 +803,7 @@ class MetroDataRepository {
       highlights: ['Red Line connecting CCS Airport to Munshipulia'],
       websiteUrl: 'https://lmrcl.com',
       mapUrl: 'https://yometro.com/images/maps/lucknow-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Red Line',
           color: Color(0xFFE53935),
@@ -703,7 +815,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'jaipur',
       cityName: 'Jaipur',
       stateName: 'Rajasthan',
@@ -716,7 +828,7 @@ class MetroDataRepository {
       highlights: ['Pink Line connecting Mansarovar to Badi Chaupar'],
       websiteUrl: 'https://transport.rajasthan.gov.in/jmrc',
       mapUrl: 'https://yometro.com/images/maps/jaipur-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Pink Line',
           color: Color(0xFFEC407A),
@@ -728,7 +840,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'kanpur',
       cityName: 'Kanpur',
       stateName: 'Uttar Pradesh',
@@ -741,7 +853,7 @@ class MetroDataRepository {
       highlights: ['Orange Line connecting IIT Kanpur to Moti Jheel'],
       websiteUrl: 'https://upmetrorail.com',
       mapUrl: 'https://yometro.com/images/maps/kanpur-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Orange Line',
           color: Color(0xFFFB8C00),
@@ -753,7 +865,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'nagpur',
       cityName: 'Nagpur',
       stateName: 'Maharashtra',
@@ -766,7 +878,7 @@ class MetroDataRepository {
       highlights: ['Orange & Aqua Lines connecting Khapri, Automotive Square & Lokmanya Nagar'],
       websiteUrl: 'https://www.metrorailnagpur.com',
       mapUrl: 'https://yometro.com/images/maps/nagpur-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Orange Line',
           color: Color(0xFFFB8C00),
@@ -787,7 +899,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'noida',
       cityName: 'Noida / Greater Noida',
       stateName: 'Uttar Pradesh',
@@ -800,7 +912,7 @@ class MetroDataRepository {
       highlights: ['Aqua Line connecting Noida Sector 51 to Depot Greater Noida'],
       websiteUrl: 'https://www.nmrcnoida.com',
       mapUrl: 'https://yometro.com/images/maps/noida-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Aqua Line',
           color: Color(0xFF00ACC1),
@@ -812,7 +924,7 @@ class MetroDataRepository {
         ),
       ],
     ),
-    MetroNetwork(
+    const MetroNetwork(
       id: 'agra',
       cityName: 'Agra',
       stateName: 'Uttar Pradesh',
@@ -825,7 +937,7 @@ class MetroDataRepository {
       highlights: ['Yellow Line connecting Taj East Gate to Mankameshwar Temple'],
       websiteUrl: 'https://upmetrorail.com',
       mapUrl: 'https://yometro.com/images/maps/agra-metro-route-map.svg',
-      lines: const [
+      lines: [
         MetroLine(
           name: 'Yellow Line',
           color: Color(0xFFFDD835),

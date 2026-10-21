@@ -21,7 +21,7 @@ class TrainService {
     } else {
       final liveData = await RailRadarSource.liveTracking(
         cleanNo,
-        includeGeometry: true,
+        includeGeometry: true, date: '',
       );
       if (liveData is Map) {
         rawMap = Map<String, dynamic>.from(liveData!);

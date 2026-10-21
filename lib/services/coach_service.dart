@@ -30,7 +30,7 @@ class CoachService {
     }
 
     // 2. Live Tracking API (contains coachPosition at train & route level)
-    final liveData = await RailRadarSource.liveTracking(cleanNo);
+    final liveData = await RailRadarSource.liveTracking(cleanNo, date: '');
     if (liveData != null) {
       try {
         await OfflineCache.put(cacheKey, liveData, ttl: const Duration(hours: 6));

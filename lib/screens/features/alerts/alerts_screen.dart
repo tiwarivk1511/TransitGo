@@ -11,7 +11,6 @@ import '../../../data/models/station.dart';
 import '../../../data/models/station_traffic.dart';
 import '../../../data/sources/railradar_source.dart';
 import '../../../services/live_traffic_service.dart';
-import '../../../services/translation_service.dart';
 import '../../train_details/train_details_screen.dart';
 
 class AlertsScreen extends StatefulWidget {

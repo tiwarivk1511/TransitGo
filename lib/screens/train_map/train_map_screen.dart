@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../components/common/error_box.dart';
@@ -11,6 +12,7 @@ import '../../components/common/live_speed_card.dart';
 import '../../core/cache/offline_cache.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../data/models/train.dart';
+import '../../data/sources/railradar_source.dart';
 import '../../services/train_service.dart';
 import '../train_details/train_details_screen.dart';
 
@@ -40,6 +42,7 @@ class _TrainMapScreenState extends State<TrainMapScreen>
   bool _loading = true;
   String? _error;
   DateTime? _lastFetch;
+  DateTime _selectedDate = DateTime.now();
   bool _didInitialFit = false;
   bool _mapReady = false;
   bool _followTrain = true;
@@ -63,7 +66,10 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     final cached = await OfflineCache.get('live_$cleanNo');
     if (cached is Map && mounted && _data == null) {
       try {
-        final parsed = TrainTracking.parse(Map<String, dynamic>.from(cached), cleanNo);
+        final parsed = TrainTracking.parse(
+          Map<String, dynamic>.from(cached),
+          cleanNo,
+        );
         final target = _trainLatLng(parsed);
         setState(() {
           _data = parsed;
@@ -98,13 +104,37 @@ class _TrainMapScreenState extends State<TrainMapScreen>
 
   void _subscribe() {
     _sub?.cancel();
+    if (mounted) setState(() => _loading = _data == null);
+
+    final cleanNo = widget.trainNumber.trim().split(' - ').first;
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    RailRadarSource.liveTracking(cleanNo, includeGeometry: true, date: dateStr)
+        .then((liveData) {
+          if (!mounted) return;
+          if (liveData != null) {
+            final parsed = TrainTracking.parse(liveData, cleanNo);
+            _onData(parsed);
+          }
+        })
+        .catchError((_) {});
+
     _sub =
         TrainService.stream(
           widget.trainNumber,
           interval: const Duration(seconds: 30),
           includeGeometry: true,
         ).listen(
-          _onData,
+          (d) {
+            final isToday =
+                DateTime.now().day == _selectedDate.day &&
+                DateTime.now().month == _selectedDate.month &&
+                DateTime.now().year == _selectedDate.year;
+
+            if (isToday) {
+              _onData(d);
+            }
+          },
           onError: (_) {
             if (!mounted) return;
             setState(() {
@@ -113,6 +143,34 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             });
           },
         );
+  }
+
+  void _onDateSelected(DateTime date) {
+    setState(() {
+      _selectedDate = date;
+      _loading = true;
+    });
+    _subscribe();
+  }
+
+  void _pickCustomDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: now.subtract(const Duration(days: 7)),
+      lastDate: now.add(const Duration(days: 7)),
+      builder: (context, child) {
+        final isDark = ThemeController.instance.isDarkMode;
+        return Theme(
+          data: isDark ? ThemeData.dark() : ThemeData.light(),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && mounted) {
+      _onDateSelected(picked);
+    }
   }
 
   void _onData(TrainTracking d) {
@@ -141,8 +199,11 @@ class _TrainMapScreenState extends State<TrainMapScreen>
   LatLng? _trainLatLng(TrainTracking data) {
     final location = data.currentLocation;
 
-    // Check if train status or location indicates train is currently at a station
-    final isAtStation = location.isHalt ||
+    final isAtStation =
+        location.isHalt ||
+        location.status.toLowerCase().contains('arrived') ||
+        location.status.toLowerCase().contains('departed') ||
+        location.status.toLowerCase().contains('delayed') ||
         location.status.toLowerCase().contains('at-station') ||
         location.status.toLowerCase().contains('at ') ||
         location.status.toLowerCase().contains('halt');
@@ -150,29 +211,36 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     final code = location.stationCode.trim().toUpperCase();
     final name = location.stationName.trim().toLowerCase();
 
-    // Find current station object in train route
     TrainRouteStop? currentStop;
     if (location.sequence > 0) {
       final idx = data.route.indexWhere((s) => s.sequence == location.sequence);
       if (idx >= 0) currentStop = data.route[idx];
     }
     if (currentStop == null && code.isNotEmpty) {
-      final idx = data.route.indexWhere((s) => s.stationCode.toUpperCase() == code);
+      final idx = data.route.indexWhere(
+        (s) => s.stationCode.toUpperCase() == code,
+      );
       if (idx >= 0) currentStop = data.route[idx];
     }
     if (currentStop == null && name.isNotEmpty) {
-      final idx = data.route.indexWhere((s) => s.stationName.toLowerCase() == name);
+      final idx = data.route.indexWhere(
+        (s) => s.stationName.toLowerCase() == name,
+      );
       if (idx >= 0) currentStop = data.route[idx];
     }
-    if (currentStop == null && data.currentIndex >= 0 && data.currentIndex < data.route.length) {
+    if (currentStop == null &&
+        data.currentIndex >= 0 &&
+        data.currentIndex < data.route.length) {
       currentStop = data.route[data.currentIndex];
     }
 
-    final currentStationPos = currentStop != null ? _positionForStop(data, currentStop) : null;
+    final currentStationPos = currentStop != null
+        ? _positionForStop(data, currentStop)
+        : null;
 
-    // If train is AT a station or very close (distance from last station <= 0.3 km), FORCE exact station position
     final distFromLast = location.distanceFromLastStationKm;
-    if (currentStationPos != null && (isAtStation || (distFromLast != null && distFromLast <= 0.3))) {
+    if (currentStationPos != null &&
+        (isAtStation || (distFromLast != null && distFromLast <= 0.3))) {
       return currentStationPos;
     }
 
@@ -249,7 +317,9 @@ class _TrainMapScreenState extends State<TrainMapScreen>
 
   void _centerOnTrain() {
     setState(() => _followTrain = true);
-    final pos = _displayedTrainPosition ?? (_data != null ? _trainLatLng(_data!) : null);
+    final pos =
+        _displayedTrainPosition ??
+        (_data != null ? _trainLatLng(_data!) : null);
     if (pos != null && _mapReady) {
       _mapController.move(pos, 13);
     }
@@ -501,9 +571,7 @@ class _TrainMapScreenState extends State<TrainMapScreen>
       backgroundColor: cardBg,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(24),
-        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => SafeArea(
         child: Padding(
@@ -518,8 +586,7 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             builder: (context, snapshot) {
               final liveData = snapshot.data ?? d;
               return LiveSpeedCard(
-                trainLivePosition:
-                    liveData.currentLocation.hasGpsCoordinates
+                trainLivePosition: liveData.currentLocation.hasGpsCoordinates
                     ? liveData.currentLocation.latLng
                     : null,
                 trainRoute: liveData.routeGeometry,
@@ -537,8 +604,12 @@ class _TrainMapScreenState extends State<TrainMapScreen>
       listenable: ThemeController.instance,
       builder: (context, _) {
         final isDark = ThemeController.instance.isDarkMode;
-        final bgColor = isDark ? const Color(0xFF09090C) : const Color(0xFFF2F2F7);
-        final cardBg = isDark ? const Color(0xFF16161C) : const Color(0xFFFFFFFF);
+        final bgColor = isDark
+            ? const Color(0xFF09090C)
+            : const Color(0xFFF2F2F7);
+        final cardBg = isDark
+            ? const Color(0xFF16161C)
+            : const Color(0xFFFFFFFF);
         final textPrimary = isDark ? Colors.white : const Color(0xFF1C1C1E);
         final textSecondary = isDark ? Colors.white54 : const Color(0xFF8E8E93);
 
@@ -578,12 +649,20 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             actions: [
               IconButton(
                 tooltip: 'Refresh',
-                icon: Icon(CupertinoIcons.refresh_bold, color: textSecondary, size: 16),
+                icon: Icon(
+                  CupertinoIcons.refresh_bold,
+                  color: textSecondary,
+                  size: 16,
+                ),
                 onPressed: _subscribe,
               ),
               IconButton(
                 tooltip: 'List view',
-                icon: Icon(CupertinoIcons.list_bullet, color: textSecondary, size: 18),
+                icon: Icon(
+                  CupertinoIcons.list_bullet,
+                  color: textSecondary,
+                  size: 18,
+                ),
                 onPressed: () {
                   Navigator.pushReplacement(
                     context,
@@ -598,8 +677,12 @@ class _TrainMapScreenState extends State<TrainMapScreen>
               ),
               IconButton(
                 icon: Icon(
-                  isDark ? CupertinoIcons.sun_max_fill : CupertinoIcons.moon_stars_fill,
-                  color: isDark ? const Color(0xFFFFD60A) : const Color(0xFF0A84FF),
+                  isDark
+                      ? CupertinoIcons.sun_max_fill
+                      : CupertinoIcons.moon_stars_fill,
+                  color: isDark
+                      ? const Color(0xFFFFD60A)
+                      : const Color(0xFF0A84FF),
                   size: 18,
                 ),
                 onPressed: () => ThemeController.instance.toggleTheme(),
@@ -646,7 +729,10 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             const SizedBox(height: 16),
             TextButton.icon(
               onPressed: _subscribe,
-              icon: const Icon(CupertinoIcons.refresh, color: Color(0xFF0A84FF)),
+              icon: const Icon(
+                CupertinoIcons.refresh,
+                color: Color(0xFF0A84FF),
+              ),
               label: Text(
                 'Retry',
                 style: GoogleFonts.inter(color: const Color(0xFF0A84FF)),
@@ -658,7 +744,13 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     );
   }
 
-  Widget _mapView(TrainTracking d, bool isDark, Color cardBg, Color textPrimary, Color textSecondary) {
+  Widget _mapView(
+    TrainTracking d,
+    bool isDark,
+    Color cardBg,
+    Color textPrimary,
+    Color textSecondary,
+  ) {
     final trainPos = _displayedTrainPosition ?? _trainLatLng(d);
     final routePoints = _getRoutePoints(d);
     final initialCenter =
@@ -666,8 +758,8 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         (routePoints.isNotEmpty
             ? routePoints.first
             : (d.geoStops.any((s) => s.latLng != null)
-                ? d.geoStops.firstWhere((stop) => stop.latLng != null).latLng!
-                : const LatLng(22.5937, 78.9629)));
+                  ? d.geoStops.firstWhere((stop) => stop.latLng != null).latLng!
+                  : const LatLng(22.5937, 78.9629)));
 
     return Stack(
       children: [
@@ -687,7 +779,9 @@ class _TrainMapScreenState extends State<TrainMapScreen>
                 _mapController.move(trainPos, 12);
               }
             },
-            backgroundColor: isDark ? const Color(0xFF09090C) : const Color(0xFFF2F2F7),
+            backgroundColor: isDark
+                ? const Color(0xFF09090C)
+                : const Color(0xFFF2F2F7),
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
             ),
@@ -699,17 +793,23 @@ class _TrainMapScreenState extends State<TrainMapScreen>
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://mt{s}.google.com/vt/lyrs=m,transit&x={x}&y={y}&z={z}',
-              fallbackUrl: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+              urlTemplate:
+                  'https://mt{s}.google.com/vt/lyrs=m,transit&x={x}&y={y}&z={z}',
+              fallbackUrl:
+                  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
               subdomains: const ['0', '1', '2', '3'],
               userAgentPackageName: 'com.transitgo.app',
               tileProvider: NetworkTileProvider(
                 headers: {
-                  'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+                  'User-Agent':
+                      'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
                 },
               ),
               errorTileCallback: (tile, error, stackTrace) {
-                if (kDebugMode) debugPrint('[TrainMapTileError] Handshake / Network tile error for ${tile.coordinates}: $error');
+                if (kDebugMode)
+                  debugPrint(
+                    '[TrainMapTileError] Handshake / Network tile error for ${tile.coordinates}: $error',
+                  );
               },
               maxZoom: 20,
             ),
@@ -750,7 +850,9 @@ class _TrainMapScreenState extends State<TrainMapScreen>
                 );
               }(),
             ],
-            MarkerLayer(markers: _stationMarkers(d, isDark, cardBg, textPrimary)),
+            MarkerLayer(
+              markers: _stationMarkers(d, isDark, cardBg, textPrimary),
+            ),
             if (trainPos != null)
               MarkerLayer(
                 markers: [
@@ -764,6 +866,90 @@ class _TrainMapScreenState extends State<TrainMapScreen>
                 ],
               ),
           ],
+        ),
+        // Top Floating Rake Date Filter Bar Overlay
+        Positioned(
+          top: 12,
+          left: 12,
+          right: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: cardBg.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark ? Colors.white12 : const Color(0xFFE5E5EA),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 8,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  _dateChip(
+                    label: 'Yesterday',
+                    date: DateTime.now().subtract(const Duration(days: 1)),
+                    cardBg: cardBg,
+                    textPrimary: textPrimary,
+                  ),
+                  const SizedBox(width: 6),
+                  _dateChip(
+                    label: 'Today',
+                    date: DateTime.now(),
+                    cardBg: cardBg,
+                    textPrimary: textPrimary,
+                  ),
+                  const SizedBox(width: 6),
+                  _dateChip(
+                    label: 'Tomorrow',
+                    date: DateTime.now().add(const Duration(days: 1)),
+                    cardBg: cardBg,
+                    textPrimary: textPrimary,
+                  ),
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: _pickCustomDate,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0A84FF).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            CupertinoIcons.calendar,
+                            color: Color(0xFF0A84FF),
+                            size: 12,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            DateFormat('d MMM').format(_selectedDate),
+                            style: GoogleFonts.inter(
+                              color: const Color(0xFF0A84FF),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
         Positioned(
           right: 12,
@@ -814,6 +1000,39 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     );
   }
 
+  Widget _dateChip({
+    required String label,
+    required DateTime date,
+    required Color cardBg,
+    required Color textPrimary,
+  }) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final selTarget = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
+    final isSelected = selTarget.isAtSameMomentAs(target);
+
+    return ChoiceChip(
+      label: Text('$label (${DateFormat('d MMM').format(date)})'),
+      selected: isSelected,
+      onSelected: (_) => _onDateSelected(date),
+      selectedColor: const Color(0xFF0A84FF),
+      backgroundColor: cardBg,
+      side: BorderSide(
+        color: isSelected ? const Color(0xFF0A84FF) : Colors.transparent,
+      ),
+      labelStyle: GoogleFonts.inter(
+        color: isSelected ? Colors.white : textPrimary,
+        fontWeight: FontWeight.w700,
+        fontSize: 10.5,
+      ),
+    );
+  }
+
   Widget _mapButton({
     required IconData icon,
     required String tooltip,
@@ -825,9 +1044,7 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: active
-            ? const Color(0xFF0A84FF)
-            : cardBg,
+        color: active ? const Color(0xFF0A84FF) : cardBg,
         shape: const CircleBorder(),
         elevation: 4,
         child: InkWell(
@@ -860,11 +1077,17 @@ class _TrainMapScreenState extends State<TrainMapScreen>
 
     if (dx == 0 && dy == 0) return a;
 
-    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-    return LatLng(ax + t * dx, ay + t * dy);
+    final t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+    final clampedT = t.clamp(0.0, 1.0);
+
+    return LatLng(ax + clampedT * dx, ay + clampedT * dy);
   }
 
-  List<LatLng> _coveredSlice(TrainTracking d, LatLng trainPos, List<LatLng> routePoints) {
+  List<LatLng> _coveredSlice(
+    TrainTracking d,
+    LatLng trainPos,
+    List<LatLng> routePoints,
+  ) {
     if (routePoints.length < 2) return const [];
 
     int bestIndex = 0;
@@ -892,7 +1115,10 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     return slice.length >= 2 ? slice : const [];
   }
 
-  List<LatLng> _smoothCurvedPolyline(List<LatLng> points, {int samplesPerSegment = 8}) {
+  List<LatLng> _smoothCurvedPolyline(
+    List<LatLng> points, {
+    int samplesPerSegment = 8,
+  }) {
     if (points.length < 3) return points;
 
     final smoothed = <LatLng>[];
@@ -914,8 +1140,16 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         final f2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t;
         final f3 = 0.5 * t3 - 0.5 * t2;
 
-        final lat = p0.latitude * f0 + p1.latitude * f1 + p2.latitude * f2 + p3.latitude * f3;
-        final lng = p0.longitude * f0 + p1.longitude * f1 + p2.longitude * f2 + p3.longitude * f3;
+        final lat =
+            p0.latitude * f0 +
+            p1.latitude * f1 +
+            p2.latitude * f2 +
+            p3.latitude * f3;
+        final lng =
+            p0.longitude * f0 +
+            p1.longitude * f1 +
+            p2.longitude * f2 +
+            p3.longitude * f3;
 
         if (lat.isFinite &&
             lng.isFinite &&
@@ -931,7 +1165,10 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     return smoothed;
   }
 
-  List<LatLng> _snapStationAnchorsToTrack(List<LatLng> polyline, TrainTracking d) {
+  List<LatLng> _snapStationAnchorsToTrack(
+    List<LatLng> polyline,
+    TrainTracking d,
+  ) {
     if (polyline.length < 2) return polyline;
 
     final snapped = List<LatLng>.from(polyline);
@@ -986,7 +1223,8 @@ class _TrainMapScreenState extends State<TrainMapScreen>
           pos.latitude <= 90.0 &&
           pos.longitude >= -180.0 &&
           pos.longitude <= 180.0) {
-        final key = '${pos.latitude.toStringAsFixed(4)},${pos.longitude.toStringAsFixed(4)}';
+        final key =
+            '${pos.latitude.toStringAsFixed(4)},${pos.longitude.toStringAsFixed(4)}';
         if (seenKeys.add(key)) {
           rawPoints.add(pos);
         }
@@ -1003,7 +1241,8 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             pos.latitude <= 90.0 &&
             pos.longitude >= -180.0 &&
             pos.longitude <= 180.0) {
-          final key = '${pos.latitude.toStringAsFixed(4)},${pos.longitude.toStringAsFixed(4)}';
+          final key =
+              '${pos.latitude.toStringAsFixed(4)},${pos.longitude.toStringAsFixed(4)}';
           if (seenKeys.add(key)) {
             rawPoints.add(pos);
           }
@@ -1016,7 +1255,12 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     return _smoothCurvedPolyline(rawPoints, samplesPerSegment: 8);
   }
 
-  List<Marker> _stationMarkers(TrainTracking d, bool isDark, Color cardBg, Color textPrimary) {
+  List<Marker> _stationMarkers(
+    TrainTracking d,
+    bool isDark,
+    Color cardBg,
+    Color textPrimary,
+  ) {
     final markers = <Marker>[];
     final geoByCode = <String, LatLng>{};
     for (final s in d.geoStops) {
@@ -1037,7 +1281,9 @@ class _TrainMapScreenState extends State<TrainMapScreen>
     final firstSeq = routeStops.first.sequence;
     final lastSeq = routeStops.last.sequence;
     final currentCode = d.currentLocation.stationCode.trim().toUpperCase();
-    final currentStationName = d.currentLocation.stationName.trim().toLowerCase();
+    final currentStationName = d.currentLocation.stationName
+        .trim()
+        .toLowerCase();
 
     for (var i = 0; i < routeStops.length; i++) {
       final stop = routeStops[i];
@@ -1051,12 +1297,17 @@ class _TrainMapScreenState extends State<TrainMapScreen>
       if (pos == null) continue;
 
       final isOrigin = i == 0 || stop.sequence == firstSeq;
-      final isDestination = i == routeStops.length - 1 || stop.sequence == lastSeq;
+      final isDestination =
+          i == routeStops.length - 1 || stop.sequence == lastSeq;
       final isHalt = stop.isHalt;
 
       final isCurrentByCode = stCode.isNotEmpty && (stCode == currentCode);
-      final isCurrentByName = stName.isNotEmpty && (stName == currentStationName);
-      final isCurrentByIndex = (d.currentIndex >= 0 && d.currentIndex < routeStops.length && i == d.currentIndex);
+      final isCurrentByName =
+          stName.isNotEmpty && (stName == currentStationName);
+      final isCurrentByIndex =
+          (d.currentIndex >= 0 &&
+          d.currentIndex < routeStops.length &&
+          i == d.currentIndex);
       final isCurrent = isCurrentByCode || isCurrentByName || isCurrentByIndex;
 
       Color dotColor;
@@ -1081,12 +1332,13 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         labelTextColor = Colors.white;
       } else {
         dotColor = isDark ? const Color(0xFF3A3A3C) : const Color(0xFF1C1C1E);
-        labelBgColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFF1C1C1E);
+        labelBgColor = isDark
+            ? const Color(0xFF2C2C2E)
+            : const Color(0xFF1C1C1E);
         labelTextColor = Colors.white;
       }
 
       if (isCurrent) {
-        // Special Animated / Pulsing Live Station Point Marker for Current Station
         markers.add(
           Marker(
             point: pos,
@@ -1104,28 +1356,6 @@ class _TrainMapScreenState extends State<TrainMapScreen>
         continue;
       }
 
-      if (!isHalt && !isOrigin && !isDestination) {
-        markers.add(
-          Marker(
-            point: pos,
-            width: 10,
-            height: 10,
-            alignment: Alignment.center,
-            child: Container(
-              decoration: BoxDecoration(
-                color: dotColor,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.2),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black38, blurRadius: 3),
-                ],
-              ),
-            ),
-          ),
-        );
-        continue;
-      }
-
       markers.add(
         Marker(
           point: pos,
@@ -1136,14 +1366,14 @@ class _TrainMapScreenState extends State<TrainMapScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3.5,
+                ),
                 decoration: BoxDecoration(
                   color: labelBgColor,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: Colors.white,
-                    width: 1.2,
-                  ),
+                  border: Border.all(color: Colors.white, width: 1.2),
                   boxShadow: const [
                     BoxShadow(
                       color: Colors.black38,
@@ -1159,7 +1389,9 @@ class _TrainMapScreenState extends State<TrainMapScreen>
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: labelTextColor == Colors.black ? Colors.black : Colors.white,
+                        color: labelTextColor == Colors.black
+                            ? Colors.black
+                            : Colors.white,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -1241,7 +1473,6 @@ class _CurrentStationMarkerState extends State<_CurrentStationMarker>
         return Stack(
           alignment: Alignment.center,
           children: [
-            // Outer Pulsing Glow Aura Ring centered on station coordinates
             Transform.scale(
               scale: glowScale,
               child: Container(
@@ -1253,7 +1484,6 @@ class _CurrentStationMarkerState extends State<_CurrentStationMarker>
                 ),
               ),
             ),
-            // Station Dot Ring
             Container(
               width: 16,
               height: 16,
@@ -1266,11 +1496,13 @@ class _CurrentStationMarkerState extends State<_CurrentStationMarker>
                 ],
               ),
             ),
-            // Floating Station Name Tag directly above the dot
             Positioned(
               bottom: 30,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3.5,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFF9F0A),
                   borderRadius: BorderRadius.circular(8),
@@ -1321,7 +1553,8 @@ class _TrainMarker extends StatefulWidget {
   State<_TrainMarker> createState() => _TrainMarkerState();
 }
 
-class _TrainMarkerState extends State<_TrainMarker> with SingleTickerProviderStateMixin {
+class _TrainMarkerState extends State<_TrainMarker>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
 
   @override
@@ -1392,9 +1625,22 @@ class _InfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final delayed = data.delayMinutes > 0;
-    final statusColor = delayed ? const Color(0xFFFF9F0A) : const Color(0xFF30D158);
+    final delayMinutes = data.delayMinutes;
+    final delayed = delayMinutes > 0;
+    final statusColor = delayMinutes > 30
+        ? const Color(0xFFFF375F)
+        : (delayed ? const Color(0xFFFF9F0A) : const Color(0xFF30D158));
     final speed = data.currentLocation.speedKmh ?? 0;
+
+    final delayText = delayMinutes > 0
+        ? (delayMinutes >= 60
+            ? '${delayMinutes ~/ 60} hrs. ${delayMinutes % 60 > 0 ? "${delayMinutes % 60}m " : ""}Late'
+            : '${delayMinutes}m Late')
+        : (delayMinutes < 0
+            ? ((-delayMinutes) >= 60
+                ? '${(-delayMinutes) ~/ 60} hrs. ${(-delayMinutes) % 60 > 0 ? "${(-delayMinutes) % 60}m " : ""}Early'
+                : '${-delayMinutes}m Early')
+            : 'On Time');
 
     final totalKm = data.distance ?? 0;
     final coveredKm = data.currentLocation.distanceFromOriginKm ?? 0;
@@ -1402,7 +1648,9 @@ class _InfoCard extends StatelessWidget {
 
     final destName = data.destination?.name.isNotEmpty == true
         ? data.destination!.name
-        : (data.destination?.code.isNotEmpty == true ? data.destination!.code : 'Destination');
+        : (data.destination?.code.isNotEmpty == true
+              ? data.destination!.code
+              : 'Destination');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1434,7 +1682,11 @@ class _InfoCard extends StatelessWidget {
                   color: const Color(0xFF0A84FF).withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(CupertinoIcons.tram_fill, color: Color(0xFF0A84FF), size: 20),
+                child: const Icon(
+                  CupertinoIcons.tram_fill,
+                  color: Color(0xFF0A84FF),
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1464,7 +1716,29 @@ class _InfoCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          'At ${data.currentLocation.stationName.isNotEmpty ? data.currentLocation.stationName : "Route"} • ${data.statusLabel}${delayed ? " (${data.delayMinutes}m late)" : ""}',
+                          'At ${data.currentLocation.stationName.isNotEmpty ? data.currentLocation.stationName : "Route"}',
+                          style: GoogleFonts.inter(
+                            color: statusColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    Row(
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: statusColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          delayText,
                           style: GoogleFonts.inter(
                             color: statusColor,
                             fontSize: 11,
@@ -1480,15 +1754,24 @@ class _InfoCard extends StatelessWidget {
                 onTap: onSpeedTestTap,
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0A84FF).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF0A84FF).withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: const Color(0xFF0A84FF).withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(CupertinoIcons.speedometer, color: Color(0xFF0A84FF), size: 14),
+                      const Icon(
+                        CupertinoIcons.speedometer,
+                        color: Color(0xFF0A84FF),
+                        size: 14,
+                      ),
                       const SizedBox(width: 4),
                       Column(
                         children: [
@@ -1518,7 +1801,12 @@ class _InfoCard extends StatelessWidget {
           ),
 
           const SizedBox(height: 12),
-          Divider(color: ThemeController.instance.isDarkMode ? Colors.white10 : const Color(0xFFE5E5EA), height: 1),
+          Divider(
+            color: ThemeController.instance.isDarkMode
+                ? Colors.white10
+                : const Color(0xFFE5E5EA),
+            height: 1,
+          ),
           const SizedBox(height: 10),
 
           Row(
@@ -1527,18 +1815,33 @@ class _InfoCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('NEXT STOP', style: GoogleFonts.inter(color: textSecondary, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                    Text(
+                      'NEXT STOP',
+                      style: GoogleFonts.inter(
+                        color: textSecondary,
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       data.nextHalt?.name ?? '—',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(color: textPrimary, fontSize: 12, fontWeight: FontWeight.w800),
+                      style: GoogleFonts.inter(
+                        color: textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     if (data.nextHalt?.arrivalTime != null)
                       Text(
                         'ETA: ${data.nextHalt!.arrivalTime}',
-                        style: GoogleFonts.inter(color: const Color(0xFF0A84FF), fontSize: 10, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF0A84FF),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                   ],
                 ),
@@ -1546,25 +1849,42 @@ class _InfoCard extends StatelessWidget {
               Container(
                 width: 1,
                 height: 28,
-                color: ThemeController.instance.isDarkMode ? Colors.white10 : const Color(0xFFE5E5EA),
+                color: ThemeController.instance.isDarkMode
+                    ? Colors.white10
+                    : const Color(0xFFE5E5EA),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('DESTINATION', style: GoogleFonts.inter(color: textSecondary, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                    Text(
+                      'DESTINATION',
+                      style: GoogleFonts.inter(
+                        color: textSecondary,
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       destName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(color: textPrimary, fontSize: 12, fontWeight: FontWeight.w800),
+                      style: GoogleFonts.inter(
+                        color: textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     if (data.destination?.arrivalTime != null)
                       Text(
                         'STA: ${data.destination!.arrivalTime}',
-                        style: GoogleFonts.inter(color: const Color(0xFF30D158), fontSize: 10, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF30D158),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                   ],
                 ),
@@ -1581,15 +1901,27 @@ class _InfoCard extends StatelessWidget {
                 children: [
                   Text(
                     'Covered: ${coveredKm.round()} km',
-                    style: GoogleFonts.inter(color: textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: GoogleFonts.inter(
+                      color: textSecondary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   Text(
                     '$pct% Completed',
-                    style: GoogleFonts.inter(color: const Color(0xFF0A84FF), fontSize: 10, fontWeight: FontWeight.w900),
+                    style: GoogleFonts.inter(
+                      color: const Color(0xFF0A84FF),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   Text(
                     'Total: ${totalKm.round()} km',
-                    style: GoogleFonts.inter(color: textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: GoogleFonts.inter(
+                      color: textSecondary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),

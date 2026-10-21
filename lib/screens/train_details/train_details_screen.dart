@@ -617,7 +617,7 @@ class _TrainDetailsScreenState extends State<TrainDetailsScreen>
       child: Row(
         children: [
           _tabChip('Timeline 📜', 0, textSecondary),
-          _tabChip('Crossings (XING) 🔀', 1, textSecondary),
+          _tabChip('Crossings 🔀', 1, textSecondary),
           _tabChip('Coaches 🚆', 2, textSecondary),
         ],
       ),
@@ -1196,13 +1196,11 @@ class _CoachStrip extends StatelessWidget {
   final List<CoachInfo> coaches;
   final String trainName;
   final String trainType;
-  final String? officialLivery;
 
   const _CoachStrip({
     required this.coaches,
     required this.trainName,
     required this.trainType,
-    this.officialLivery,
   });
 
   @override
@@ -1210,7 +1208,6 @@ class _CoachStrip extends StatelessWidget {
     return StaticTrainRakeView(
       trainName: trainName,
       trainType: trainType,
-      officialLivery: officialLivery,
       coaches: coaches,
     );
   }
@@ -1369,6 +1366,26 @@ class _RouteTimeline extends StatelessWidget {
     );
   }
 
+  static String _formatDelayBadge(int delayMinutes, {bool isEarly = false}) {
+    if (delayMinutes <= 0) return 'On Time 🟢';
+
+    final hours = delayMinutes ~/ 60;
+    final mins = delayMinutes % 60;
+
+    final String timeStr;
+    if (hours > 0) {
+      if (mins > 0) {
+        timeStr = '$hours hrs. ${mins}m';
+      } else {
+        timeStr = '$hours hrs.';
+      }
+    } else {
+      timeStr = '${mins}m';
+    }
+
+    return isEarly ? '$timeStr early 🟢' : '+$timeStr late';
+  }
+
   static Widget _buildStopTile(
     BuildContext context,
     int idx,
@@ -1386,26 +1403,50 @@ class _RouteTimeline extends StatelessWidget {
     final isLast = idx == totalStops - 1;
     final isCurrent = idx == data.currentIndex;
     final isPassed = idx < data.currentIndex;
+    final isUpcoming = idx > data.currentIndex || (!isPassed && !isCurrent);
     final isHalt = stop.isHalt || isFirst || isLast;
 
-    final arrStr = TrainRouteStop.formatHm(stop.effectiveArrival) ?? '--';
-    final depStr = TrainRouteStop.formatHm(stop.effectiveDeparture) ?? '--';
+    final liveTrainDelay = data.delayMinutes;
+
+    int stopDelay = 0;
+    if (stop.delayMinutes != null && stop.delayMinutes! > 0) {
+      stopDelay = stop.delayMinutes!;
+    } else if (isUpcoming || isCurrent) {
+      stopDelay = liveTrainDelay;
+    } else if (isPassed) {
+      stopDelay = stop.delayMinutes ?? 0;
+    }
+
+    DateTime? effectiveArrDt = stop.actualArrival;
+    DateTime? effectiveDepDt = stop.actualDeparture;
+
+    if (effectiveArrDt == null && stop.scheduledArrival != null) {
+      if (stopDelay > 0 && (isUpcoming || isCurrent)) {
+        effectiveArrDt = stop.scheduledArrival!.add(Duration(minutes: stopDelay));
+      } else {
+        effectiveArrDt = stop.scheduledArrival;
+      }
+    }
+
+    if (effectiveDepDt == null && stop.scheduledDeparture != null) {
+      if (stopDelay > 0 && (isUpcoming || isCurrent)) {
+        effectiveDepDt = stop.scheduledDeparture!.add(Duration(minutes: stopDelay));
+      } else {
+        effectiveDepDt = stop.scheduledDeparture;
+      }
+    }
+
+    final arrStr = TrainRouteStop.formatHm(effectiveArrDt) ?? '--';
+    final depStr = TrainRouteStop.formatHm(effectiveDepDt) ?? '--';
     final schArrStr = TrainRouteStop.formatHm(stop.scheduledArrival) ?? '--';
     final schDepStr = TrainRouteStop.formatHm(stop.scheduledDeparture) ?? '--';
 
-    final liveTrainDelay = data.delayMinutes;
-    final stopDelay = stop.delayMinutes ?? (isPassed ? 0 : liveTrainDelay);
-
     String passTimeDisplay = arrStr;
     if (!isHalt && !isFirst && !isLast) {
-      if (stop.effectiveArrival != null) {
-        passTimeDisplay = TrainRouteStop.formatHm(stop.effectiveArrival) ?? '--';
-      } else if (stop.scheduledArrival != null && stopDelay > 0) {
-        final estDt = stop.scheduledArrival!.add(Duration(minutes: stopDelay));
-        passTimeDisplay = DateFormat('h:mm a').format(estDt);
-      } else if (stop.scheduledDeparture != null && stopDelay > 0) {
-        final estDt = stop.scheduledDeparture!.add(Duration(minutes: stopDelay));
-        passTimeDisplay = DateFormat('h:mm a').format(estDt);
+      if (effectiveArrDt != null) {
+        passTimeDisplay = TrainRouteStop.formatHm(effectiveArrDt) ?? '--';
+      } else if (effectiveDepDt != null) {
+        passTimeDisplay = TrainRouteStop.formatHm(effectiveDepDt) ?? '--';
       } else if (schArrStr != '--') {
         passTimeDisplay = schArrStr;
       } else if (schDepStr != '--') {
@@ -1614,7 +1655,7 @@ class _RouteTimeline extends StatelessWidget {
                   const SizedBox(height: 2),
                   if (stopDelay > 0)
                     Text(
-                      '+${stopDelay}m late',
+                      _formatDelayBadge(stopDelay),
                       style: GoogleFonts.inter(
                         color: isPassed
                             ? const Color(0xFFFF9F0A).withValues(alpha: 0.7)
@@ -1623,7 +1664,7 @@ class _RouteTimeline extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     )
-                  else if (isPassed || isCurrent)
+                  else if (isPassed || isCurrent || stopDelay == 0)
                     Text(
                       'On Time 🟢',
                       style: GoogleFonts.inter(

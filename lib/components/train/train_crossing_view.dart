@@ -435,7 +435,7 @@ class _CrossingTrainCardTileState extends State<_CrossingTrainCardTile> {
 
   Future<void> _fetchLiveTracking(String num, String initialName) async {
     try {
-      final data = await RailRadarSource.liveTracking(num, includeGeometry: false);
+      final data = await RailRadarSource.liveTracking(num, includeGeometry: false, date: '');
       if (!mounted) return;
 
       if (data != null) {

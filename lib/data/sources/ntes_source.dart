@@ -129,7 +129,7 @@ class NtesSource {
 
     // ── 1) RailRadar ─────────────────────────────────────────────
     final rr = await _tryRailRadar(
-      () => RailRadarSource.liveTracking(n, includeGeometry: true),
+      () => RailRadarSource.liveTracking(n, includeGeometry: true, date: ''),
     );
     if (rr != null) return rr;
 
@@ -693,7 +693,7 @@ class NtesSource {
 
     // Fallback: search in OfflineCache recent/tracked trains
     try {
-      final recent = await OfflineCache.getRecentTrains(limit: limit);
+      final recent = await OfflineCache.getRecentTrains(limit: 50);
       final q = query.trim().toLowerCase();
       return recent
           .where((t) {
@@ -701,7 +701,13 @@ class NtesSource {
             final name = t['train_name']?.toString().toLowerCase() ?? '';
             return num.contains(q) || name.contains(q);
           })
-          .map((t) => {'number': t['train_number'], 'name': t['train_name']})
+          .map((t) => {
+                'number': t['train_number'] ?? '',
+                'name': t['train_name'] ?? 'Train ${t['train_number']}',
+                'source': t['source'] ?? t['from'] ?? '',
+                'destination': t['destination'] ?? t['to'] ?? '',
+              })
+          .take(limit)
           .toList();
     } catch (_) {
       return const [];

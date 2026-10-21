@@ -23,7 +23,7 @@ class LiveTrafficService {
     if (src == null) return null;
 
     try {
-      if (d != null && !(d is Map && d['__html__'] is String)) {
+      if (d != null && d['__html__'] is! String) {
         await OfflineCache.put(cacheKey, src,
             ttl: const Duration(minutes: 3));
       }

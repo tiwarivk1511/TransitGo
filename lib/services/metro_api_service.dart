@@ -60,7 +60,7 @@ class MetroApiService {
     'sec-fetch-mode': 'cors',
     'sec-fetch-site': 'same-origin',
     'user-agent':
-        'Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Edg/154.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Edg/154.0.0.0 Mobile Safari/154.0.0.0',
   };
 
   static const Map<String, String> MetroHeaders = {
@@ -68,7 +68,7 @@ class MetroApiService {
     'accept-language': 'en-US,en;q=0.9,hi;q=0.7',
     'referer': 'https://yometro.com/app/',
     'user-agent':
-        'Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Edg/154.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Edg/154.0.0.0 Mobile Safari/154.0.0.0',
   };
 
   /// Map of city/network IDs to YoMetro Zone IDs
@@ -125,6 +125,7 @@ class MetroApiService {
     final code = lineCode.toLowerCase();
     if (code.contains('red')) return const Color(0xFFE53935);
     if (code.contains('yellow')) return const Color(0xFFFDD835);
+    if (code.contains('gold') || code.contains('golden')) return const Color(0xFFFDD835);
     if (code.contains('blue')) return const Color(0xFF1E88E5);
     if (code.contains('green')) return const Color(0xFF43A047);
     if (code.contains('violet') || code.contains('purple')) return const Color(0xFF8E24AA);
@@ -170,7 +171,6 @@ class MetroApiService {
         .replaceAll('(', '')
         .replaceAll(')', '')
         .replaceAll('.', '')
-        .replaceAll('isbt', '')
         .replaceAll(' - ', '-')
         .replaceAll(' ', '-')
         .replaceAll(RegExp(r'-+'), '-')
@@ -179,12 +179,11 @@ class MetroApiService {
     if (s.startsWith('-')) s = s.substring(1);
     if (s.endsWith('-')) s = s.substring(0, s.length - 1);
 
-    var c = cityName.toLowerCase().replaceAll(' ', '').replaceAll('ncr', '');
-    if (c.isEmpty || c == 'delhincr' || c == 'delhi') {
-      c = 'delhi';
+    if (s.contains('-metro-station-')) {
+      s = s.split('-metro-station-').first;
     }
 
-    return '$s-metro-station-$c';
+    return s;
   }
 
   /// Fetches exact 100% live routes directly from YoMetro Open Web Route API: https://yometro.com/api/route.php?slug=...
@@ -192,48 +191,68 @@ class MetroApiService {
     required MetroNetwork network,
     required String sourceStation,
     required String destinationStation,
+    String? sourceSlug,
+    String? destinationSlug,
   }) async {
-    final srcSlug = formatYoMetroStationSlug(sourceStation, network.cityName);
-    final dstSlug = formatYoMetroStationSlug(destinationStation, network.cityName);
-    final slug = 'from-$srcSlug-to-$dstSlug';
-    final url = '${SecurityUtils.yoMetroRouteUrl}$slug';
+    final srcSlug = sourceSlug ?? formatYoMetroStationSlug(sourceStation, network.cityName);
+    final dstSlug = destinationSlug ?? formatYoMetroStationSlug(destinationStation, network.cityName);
 
-    try {
-      final response = await _client.get(
-        Uri.parse(url),
-        headers: MetroHeaders,
-      ).timeout(const Duration(seconds: 8));
+    final netId = network.id.toLowerCase();
+    final slugsToTry = [
+      'from-$srcSlug-to-$dstSlug',
+      'from-$srcSlug-metro-station-$netId-to-$dstSlug-metro-station-$netId',
+    ];
 
-      if (response.statusCode == 200) {
-        final body = json.decode(response.body);
-        if (body is Map && body['route_algo'] is Map) {
-          final results = <MetroRoute>[];
+    for (final slug in slugsToTry) {
+      final url = '${SecurityUtils.yoMetroRouteUrl}$slug';
 
-          final algoRoute = _parseYoMetroRouteData(
-            network: network,
-            sourceStation: sourceStation,
-            destinationStation: destinationStation,
-            data: Map<String, dynamic>.from(body['route_algo'] as Map),
-            tag: 'Fastest Route ⚡',
-          );
-          if (algoRoute != null) results.add(algoRoute);
+      try {
+        final response = await _client.get(
+          Uri.parse(url),
+          headers: MetroHeaders,
+        ).timeout(const Duration(seconds: 8));
 
-          if (body['route_custom'] is Map) {
-            final customRoute = _parseYoMetroRouteData(
-              network: network,
-              sourceStation: sourceStation,
-              destinationStation: destinationStation,
-              data: Map<String, dynamic>.from(body['route_custom'] as Map),
-              tag: 'Alternate Route 🚇',
-            );
-            if (customRoute != null) results.add(customRoute);
+        if (response.statusCode == 200) {
+          final body = json.decode(response.body);
+          if (body is Map && (body['route_algo'] is Map || body['route_custom'] is Map)) {
+            final results = <MetroRoute>[];
+
+            final srcName = (body['source_station'] is Map
+                ? body['source_station']['station_name_en']
+                : null) ?? sourceStation;
+
+            final dstName = (body['destination_station'] is Map
+                ? body['destination_station']['station_name_en']
+                : null) ?? destinationStation;
+
+            if (body['route_custom'] is Map && (body['route_custom']['stations'] as List?)?.isNotEmpty == true) {
+              final customRoute = _parseYoMetroRouteData(
+                network: network,
+                sourceStation: srcName.toString(),
+                destinationStation: dstName.toString(),
+                data: Map<String, dynamic>.from(body['route_custom'] as Map),
+                tag: 'Fastest Route ⚡',
+              );
+              if (customRoute != null) results.add(customRoute);
+            }
+
+            if (body['route_algo'] is Map && (body['route_algo']['stations'] as List?)?.isNotEmpty == true) {
+              final algoRoute = _parseYoMetroRouteData(
+                network: network,
+                sourceStation: srcName.toString(),
+                destinationStation: dstName.toString(),
+                data: Map<String, dynamic>.from(body['route_algo'] as Map),
+                tag: 'Alternate Route 🚇',
+              );
+              if (algoRoute != null) results.add(algoRoute);
+            }
+
+            if (results.isNotEmpty) return results;
           }
-
-          if (results.isNotEmpty) return results;
         }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[YoMetroRouteApi] fetchRoutes error: $e');
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[YoMetroRouteApi] fetchRoutes error: $e');
     }
 
     return const [];
@@ -268,32 +287,41 @@ class MetroApiService {
     Color currentColor = _parseColorHex((rawStations.first['line_color'] ?? '').toString()) ?? const Color(0xFF0A84FF);
     List<String> currentSegmentStations = [(rawStations.first['station_name_en'] ?? sourceStation).toString()];
 
+    dynamic lastLineId = rawStations.first['line_id'];
+
     for (int i = 1; i < rawStations.length; i++) {
       final item = rawStations[i] as Map;
       final stName = (item['station_name_en'] ?? '').toString();
       final lineName = (item['line_name_en'] ?? currentLine).toString();
       final lineColorHex = (item['line_color'] ?? '').toString();
       final lineColor = _parseColorHex(lineColorHex) ?? currentColor;
+      final lineId = item['line_id'];
 
-      if (lineName == currentLine) {
-        if (currentSegmentStations.isEmpty || currentSegmentStations.last != stName) {
+      final isLineChange = (lastLineId != null && lineId != null && lastLineId != lineId) ||
+          (lineName != currentLine);
+
+      if (!isLineChange) {
+        if (stName.isNotEmpty) {
           currentSegmentStations.add(stName);
         }
       } else {
-        if (currentSegmentStations.length > 1) {
+        if (currentSegmentStations.isNotEmpty) {
+          final fromSt = currentSegmentStations.first;
+          final toSt = currentSegmentStations.last;
           segments.add(MetroRouteSegment(
             lineName: currentLine,
             lineColor: currentColor,
-            fromStation: currentSegmentStations.first,
-            toStation: currentSegmentStations.last,
+            fromStation: fromSt,
+            toStation: toSt,
             stations: List.from(currentSegmentStations),
-            distanceKm: double.parse(((currentSegmentStations.length - 1) * 1.3).toStringAsFixed(1)),
+            distanceKm: double.parse(((currentSegmentStations.length - 1) * 1.2).toStringAsFixed(1)),
             durationMinutes: (currentSegmentStations.length - 1) * 2,
           ));
         }
 
+        final interchangeStation = currentSegmentStations.isNotEmpty ? currentSegmentStations.last : stName;
         interchanges.add(MetroInterchange(
-          stationName: currentSegmentStations.isNotEmpty ? currentSegmentStations.last : stName,
+          stationName: interchangeStation,
           fromLine: currentLine,
           toLine: lineName,
           toLineColor: lineColor,
@@ -301,18 +329,21 @@ class MetroApiService {
 
         currentLine = lineName;
         currentColor = lineColor;
+        lastLineId = lineId;
         currentSegmentStations = [stName];
       }
     }
 
-    if (currentSegmentStations.length > 1) {
+    if (currentSegmentStations.isNotEmpty) {
+      final fromSt = currentSegmentStations.first;
+      final toSt = currentSegmentStations.last;
       segments.add(MetroRouteSegment(
         lineName: currentLine,
         lineColor: currentColor,
-        fromStation: currentSegmentStations.first,
-        toStation: currentSegmentStations.last,
+        fromStation: fromSt,
+        toStation: toSt,
         stations: List.from(currentSegmentStations),
-        distanceKm: double.parse(((currentSegmentStations.length - 1) * 1.3).toStringAsFixed(1)),
+        distanceKm: double.parse(((currentSegmentStations.length - 1) * 1.2).toStringAsFixed(1)),
         durationMinutes: (currentSegmentStations.length - 1) * 2,
       ));
     }
@@ -342,14 +373,24 @@ class MetroApiService {
     }
   }
 
-  /// Fetches dynamic active stations for a city from Firebase Remote Config (parameter: stations_{code}) or TrackMyMetro REST API
+  /// Fetches dynamic active stations for a city from YoMetro or Firebase Remote Config or TrackMyMetro
   static Future<List<Map<String, dynamic>>> fetchTrackMyMetroStations(String cityCode) async {
     final code = cityCode.trim().toLowerCase();
     if (_trackMyMetroStationsCache.containsKey(code)) {
       return _trackMyMetroStationsCache[code]!;
     }
 
-    // 1. Fetch from Firebase Remote Config first (parameter key format: stations_{code})
+    // 1. Fetch from YoMetro station.php if zone ID exists
+    final zoneId = yoMetroZoneIds[code];
+    if (zoneId != null) {
+      final yoStns = await fetchYoMetroStations(zoneId);
+      if (yoStns.isNotEmpty) {
+        _trackMyMetroStationsCache[code] = yoStns;
+        return yoStns;
+      }
+    }
+
+    // 2. Fetch from Firebase Remote Config (parameter key format: stations_{code})
     try {
       final remoteConfigJson = RemoteConfigService.getMetroStationsJson(code);
       if (remoteConfigJson.isNotEmpty) {
@@ -375,7 +416,6 @@ class MetroApiService {
         }
 
         if (results.isNotEmpty) {
-          if (kDebugMode) debugPrint('[RemoteConfig] Successfully loaded ${results.length} metro stations for stations_$code');
           _trackMyMetroStationsCache[code] = results;
           return results;
         }
@@ -384,7 +424,7 @@ class MetroApiService {
       if (kDebugMode) debugPrint('[RemoteConfig] fetchMetroStations error for stations_$code: $e');
     }
 
-    // 2. TrackMyMetro REST API call
+    // 3. TrackMyMetro REST API call
     final url = '${SecurityUtils.trackMyMetroBaseUrl}$code.json?v=1.6';
     try {
       final response = await http.get(
@@ -419,16 +459,6 @@ class MetroApiService {
       }
     } catch (e) {
       if (kDebugMode) debugPrint('[TrackMyMetroApi] fetchTrackMyMetroStations error for $code: $e');
-    }
-
-    // 3. Fallback: YoMetro Open Web REST API
-    final zoneId = yoMetroZoneIds[code];
-    if (zoneId != null) {
-      final yoStns = await fetchYoMetroStations(zoneId);
-      if (yoStns.isNotEmpty) {
-        _trackMyMetroStationsCache[code] = yoStns;
-        return yoStns;
-      }
     }
 
     return const [];
@@ -573,7 +603,7 @@ class MetroApiService {
     ];
   }
 
-  /// Fetches all active station list for a metro network zone from YoMetro API
+  /// Fetches all active station list for a metro network zone from YoMetro API (v2 endpoint)
   static Future<List<Map<String, dynamic>>> fetchYoMetroStations(int zoneId) async {
     if (MetroStationsCache.containsKey(zoneId)) {
       return MetroStationsCache[zoneId]!;
@@ -581,57 +611,44 @@ class MetroApiService {
 
     final results = <Map<String, dynamic>>[];
     final seen = <String>{};
-    int page = 1;
-    int pageCount = 1;
 
     try {
-      while (page <= pageCount && page <= 8) {
-        final uri = Uri.parse(
-          'https://metro.yoinfra.com/api/line-routes?fields[0]=station_status'
-          '&populate[station][fields][0]=slug_for_route'
-          '&populate[station][fields][1]=unique_id'
-          '&pagination[pageSize]=100&pagination[page]=$page'
-          '&filters[station][metro_network][zone_id][\$eq]=$zoneId',
-        );
+      final uri = Uri.parse('https://yometro.com/api/station.php?zoneid=$zoneId&status=1');
+      final response = await _client.get(uri, headers: MetroHeaders).timeout(const Duration(seconds: 8));
 
-        final response = await _client.get(uri, headers: MetroHeaders).timeout(const Duration(seconds: 6));
-        if (response.statusCode == 200) {
-          final body = json.decode(response.body);
-          if (body is Map) {
-            final meta = body['meta'] as Map?;
-            final pagination = meta?['pagination'] as Map?;
-            pageCount = (pagination?['pageCount'] as num?)?.toInt() ?? 1;
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body);
+        List<dynamic> rawList = [];
+        if (body is Map && body['stations'] is List) {
+          rawList = body['stations'] as List;
+        } else if (body is List) {
+          rawList = body;
+        }
 
-            final list = body['data'] as List<dynamic>? ?? [];
-            for (final item in list) {
-              if (item is Map) {
-                final status = (item['station_status'] ?? 'active').toString().toLowerCase();
-                final st = item['station'] is Map ? Map<String, dynamic>.from(item['station'] as Map) : null;
-                if (st != null && status == 'active') {
-                  final slug = (st['slug_for_route'] ?? '').toString();
-                  final uid = (st['unique_id'] ?? '').toString();
-                  final cleanName = cleanSlugToStationName(slug);
+        for (final item in rawList) {
+          if (item is Map) {
+            final name = (item['station_name_en'] ?? item['name'] ?? '').toString().trim();
+            final slug = (item['station_slug_noid'] ?? item['slug'] ?? '').toString().trim();
+            final city = (item['station_city_en'] ?? '').toString().trim();
 
-                  if (cleanName.isNotEmpty && seen.add(cleanName.toLowerCase())) {
-                    results.add({
-                      'unique_id': uid,
-                      'slug': slug,
-                      'name': cleanName,
-                      'status': status,
-                    });
-                  }
-                }
-              }
+            if (name.isNotEmpty && seen.add(name.toLowerCase())) {
+              results.add({
+                'name': name,
+                'slug': slug.isNotEmpty ? slug : formatYoMetroStationSlug(name, city),
+                'city': city,
+                'displayName': city.isNotEmpty ? '$name, $city' : name,
+              });
             }
           }
         }
-        page++;
-      }
-      if (results.isNotEmpty) {
-        MetroStationsCache[zoneId] = results;
+
+        if (results.isNotEmpty) {
+          MetroStationsCache[zoneId] = results;
+          return results;
+        }
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('[YoMetroApi] fetchYoMetroStations zone $zoneId failed: $e');
+      if (kDebugMode) debugPrint('[YoMetroApi] station.php zone $zoneId failed: $e');
     }
 
     return results;

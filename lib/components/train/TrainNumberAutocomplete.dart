@@ -101,7 +101,9 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
 
     final seen = <String>{};
     final merged = <Map<String, dynamic>>[];
+    final qLow = q.toLowerCase();
 
+    // 1. Direct digits lookup for train number
     final digits = q.replaceAll(RegExp(r'\D'), '');
     if (digits.length >= 2) {
       final single = await RailRadarSource.fetchSingleTrainName(digits);
@@ -119,25 +121,65 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
       }
     }
 
-    final cached = await OfflineCache.get('train_search_${q.toLowerCase()}');
-    if (cached is List) {
-      for (final item in cached) {
-        if (item is Map) {
-          final no = (item['train_number'] ?? item['number'] ?? '').toString().trim();
-          final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
-          if (no.isNotEmpty && seen.add(no)) {
+    // 2. Instant Local SQLite Train Catalog Match (Top 25 matches)
+    try {
+      final catalog = await OfflineCache.searchTrainCatalog(q, limit: 25);
+      for (final item in catalog) {
+        final no = (item['number'] ?? item['train_number'] ?? '').toString().trim();
+        final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
+        if (no.isNotEmpty && seen.add(no)) {
+          merged.add({
+            'number': no,
+            'name': isValidTrainName(name) ? name : 'Train $no',
+            'source': item['source'] ?? '',
+            'destination': item['destination'] ?? '',
+          });
+        }
+      }
+    } catch (_) {}
+
+    // 3. Search local recent / tracked trains (matching number OR name)
+    try {
+      final recent = await OfflineCache.getRecentTrains(limit: 50);
+      for (final item in recent) {
+        final no = (item['train_number'] ?? item['number'] ?? '').toString().trim();
+        final name = (item['train_name'] ?? item['name'] ?? '').toString().trim();
+        if (no.isNotEmpty && (no.toLowerCase().contains(qLow) || name.toLowerCase().contains(qLow))) {
+          if (seen.add(no)) {
             merged.add({
               'number': no,
-              'name': name.isNotEmpty ? name : 'Train $no',
+              'name': isValidTrainName(name) ? name : 'Train $no',
               'source': _extractStation(Map<String, dynamic>.from(item), ['from', 'source', 'from_station']),
               'destination': _extractStation(Map<String, dynamic>.from(item), ['to', 'destination', 'to_station']),
             });
           }
         }
       }
+    } catch (_) {}
+
+    // 4. Search saved autocomplete queries cache
+    final cached = await OfflineCache.get('train_search_${q.toLowerCase()}');
+    if (cached is List) {
+      for (final item in cached) {
+        if (item is Map) {
+          final no = (item['train_number'] ?? item['number'] ?? '').toString().trim();
+          final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
+          if (no.isNotEmpty && (no.toLowerCase().contains(qLow) || name.toLowerCase().contains(qLow))) {
+            if (seen.add(no)) {
+              merged.add({
+                'number': no,
+                'name': isValidTrainName(name) ? name : 'Train $no',
+                'source': _extractStation(Map<String, dynamic>.from(item), ['from', 'source', 'from_station']),
+                'destination': _extractStation(Map<String, dynamic>.from(item), ['to', 'destination', 'to_station']),
+              });
+            }
+          }
+        }
+      }
     }
 
-    final remote = await RailRadarSource.searchTrains(q);
+    // 5. Remote search query (matching both train number AND train name)
+    final remote = await RailRadarSource.searchTrains(q, limit: 25);
     for (final item in remote) {
       final no = (item['train_number'] ?? item['number'] ?? '').toString().trim();
       final name = (item['name'] ?? item['train_name'] ?? '').toString().trim();
@@ -145,7 +187,7 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
         if (seen.add(no)) {
           merged.add({
             'number': no,
-            'name': name.isNotEmpty ? name : 'Train $no',
+            'name': isValidTrainName(name) ? name : 'Train $no',
             'source': _extractStation(item, ['from', 'source', 'from_station']),
             'destination': _extractStation(item, ['to', 'destination', 'to_station']),
           });
@@ -153,9 +195,7 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
           final existingIndex = merged.indexWhere((m) => m['number'] == no);
           if (existingIndex >= 0) {
             final existingName = merged[existingIndex]['name']?.toString() ?? '';
-            if ((existingName.isEmpty || existingName.startsWith('Train ')) &&
-                name.isNotEmpty &&
-                !name.startsWith('Train ')) {
+            if (!isValidTrainName(existingName) && isValidTrainName(name)) {
               merged[existingIndex]['name'] = name;
             }
           }
@@ -163,14 +203,32 @@ class _TrainNumberAutocompleteState extends State<TrainNumberAutocomplete> {
       }
     }
 
+    // 6. Relevance Sorting: Exact matches & Prefix matches first
+    merged.sort((a, b) {
+      final aNo = a['number']?.toString().toLowerCase() ?? '';
+      final bNo = b['number']?.toString().toLowerCase() ?? '';
+      final aName = a['name']?.toString().toLowerCase() ?? '';
+      final bName = b['name']?.toString().toLowerCase() ?? '';
+
+      if (aNo == qLow) return -1;
+      if (bNo == qLow) return 1;
+      if (aNo.startsWith(qLow) && !bNo.startsWith(qLow)) return -1;
+      if (!aNo.startsWith(qLow) && bNo.startsWith(qLow)) return 1;
+      if (aName.startsWith(qLow) && !bName.startsWith(qLow)) return -1;
+      if (!aName.startsWith(qLow) && bName.startsWith(qLow)) return 1;
+      return 0;
+    });
+
+    final cappedResults = merged.take(25).toList();
+
     if (mounted && seq == _reqSeq) {
-      if (merged.isNotEmpty) {
+      if (cappedResults.isNotEmpty) {
         if (_searchMemoryCache.length > 100) _searchMemoryCache.clear();
-        _searchMemoryCache[cacheKey] = merged;
-        unawaited(OfflineCache.put('train_search_${q.toLowerCase()}', merged, ttl: const Duration(days: 7)));
+        _searchMemoryCache[cacheKey] = cappedResults;
+        unawaited(OfflineCache.put('train_search_${q.toLowerCase()}', cappedResults, ttl: const Duration(days: 7)));
       }
       setState(() {
-        _items = merged;
+        _items = cappedResults;
         _loading = false;
       });
     }
@@ -326,6 +384,16 @@ class _TrainAutocompleteTile extends StatefulWidget {
   State<_TrainAutocompleteTile> createState() => _TrainAutocompleteTileState();
 }
 
+bool isValidTrainName(String name) {
+  final clean = name.trim();
+  if (clean.isEmpty) return false;
+  if (clean.startsWith('Train ')) return false;
+  if (clean == 'Express') return false;
+  if (RegExp(r'^\d+$').hasMatch(clean)) return false;
+  if (clean.length < 3) return false;
+  return true;
+}
+
 class _TrainAutocompleteTileState extends State<_TrainAutocompleteTile> {
   static final Map<String, String> _resolvedNameCache = {};
   String? _displayName;
@@ -347,17 +415,20 @@ class _TrainAutocompleteTileState extends State<_TrainAutocompleteTile> {
     final name = (widget.item['name'] ?? '').toString().trim();
 
     if (_resolvedNameCache.containsKey(cleanNo)) {
-      _displayName = _resolvedNameCache[cleanNo];
-      return;
+      final cachedName = _resolvedNameCache[cleanNo]!;
+      if (isValidTrainName(cachedName)) {
+        _displayName = cachedName;
+        return;
+      }
     }
 
-    if (name.isNotEmpty && !name.startsWith('Train ') && name != 'Express') {
+    if (isValidTrainName(name)) {
       _displayName = name;
       _resolvedNameCache[cleanNo] = name;
       return;
     }
 
-    _displayName = name.isNotEmpty ? name : 'Train $cleanNo';
+    _displayName = 'Train $cleanNo';
 
     if (cleanNo.isNotEmpty) {
       RailRadarSource.fetchTrainName(cleanNo).then((info) {
@@ -365,12 +436,21 @@ class _TrainAutocompleteTileState extends State<_TrainAutocompleteTile> {
         final src = info['source']?.toString().trim() ?? '';
         final dst = info['destination']?.toString().trim() ?? '';
 
-        if (realName.isNotEmpty && !realName.startsWith('Train ') && mounted) {
+        if (isValidTrainName(realName) && mounted) {
           _resolvedNameCache[cleanNo] = realName;
           widget.item['name'] = realName;
           if (src.isNotEmpty) widget.item['source'] = src;
           if (dst.isNotEmpty) widget.item['destination'] = dst;
           setState(() => _displayName = realName);
+
+          unawaited(OfflineCache.saveTrainCatalog([
+            {
+              'number': cleanNo,
+              'name': realName,
+              'source': src,
+              'destination': dst,
+            }
+          ]));
         }
       }).catchError((_) {});
     }

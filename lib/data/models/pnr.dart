@@ -191,7 +191,6 @@ class PnrPassenger {
         .toString();
 
     final up = current.toUpperCase();
-    final bookingUp = booking.toUpperCase();
 
     return PnrPassenger(
       serialNumber: serial,
